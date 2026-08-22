@@ -209,14 +209,14 @@ _COLUMN_FRAG = {
 
 
 def _infer_tabular_format(handle, is_byte=False):
-    """Infer tabular format from the tabular file header. (PRIVATE)"""
+    """Infer tabular format from the tabular file header (PRIVATE)."""
     # infernal tabular output columns are space separated files with spaces in
     # column names, ex:
     # #target name         accession
     # #------------------- ---------
-    # so we use the second line of the header where the is not spaces to
+    # so we use the second line of the header where there are no spaces to
     # determine the position of the headers labels. Then we can get the label names
-    # and compare the the different tabular format names. This label comparison is done
+    # and compare the different tabular format names. This label comparison is done
     # (instead of counting fields) to avoid issues if future tabular format have the
     # same number of fields, but with different signification
 

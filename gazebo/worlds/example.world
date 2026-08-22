@@ -50,11 +50,13 @@
       </link>
     </model>
 
+    <!--
     <include>
       <uri>model://mrsim-tilthex</uri>
       <name>hr6</name>
       <pose>1 0 0.21 0 0 0</pose>
     </include>
+    -->
 
     <include>
       <uri>model://mrsim-quadrotor</uri>

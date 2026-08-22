@@ -252,6 +252,7 @@ class TreeElement:
         )
 
     def __str__(self) -> str:
+        """Return the object's constructor representation, as given by __repr__."""
         return self.__repr__()
 
 
@@ -593,7 +594,8 @@ class TreeMixin:
         popped = parent.clades.pop(parent.clades.index(path[-1]))
         extra_length = popped.branch_length or 0
         for child in popped:
-            child.branch_length += extra_length
+            if child.branch_length is not None:
+                child.branch_length += extra_length
         parent.clades.extend(popped.clades)
         return parent
 
