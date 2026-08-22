@@ -1,0 +1,10 @@
+echo "sourced ${TK3LAB_WS}/.bashrc"
+
+# 1. Activate the project's Python virtual environment
+source ${TK3LAB_WS}/venv/bin/activate
+
+# 2. Make Gazebo aware of your custom models/worlds
+export GZ_SIM_RESOURCE_PATH=$GZ_SIM_RESOURCE_PATH:${TK3LAB_WS}/gazebo/models
+
+# 3. Make Gazebo aware of any custom plugins
+export GZ_SIM_SYSTEM_PLUGIN_PATH=$GZ_SIM_SYSTEM_PLUGIN_PATH:${TK3LAB_WS}/gazebo/plugins

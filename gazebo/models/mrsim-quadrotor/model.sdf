@@ -1,0 +1,180 @@
+<?xml version="1.0" ?>
+<sdf version="1.5">
+  <model name="mrsim-quadrotor">
+    <link name="base">
+      <inertial>
+        <mass>1.0</mass>
+        <inertia>
+          <ixx>0.015</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.015</iyy><iyz>0</iyz>
+          <izz>0.007</izz>
+        </inertia>
+      </inertial>
+
+      <collision name="base">
+        <geometry>
+          <cylinder><radius>0.1</radius><length>0.05</length></cylinder>
+        </geometry>
+      </collision>
+      <!-- three spheres to make contact stable -->
+      <collision name="land_1">
+        <pose>0.1 0 0 0 0 0</pose>
+        <geometry>
+          <sphere><radius>0.03</radius></sphere>
+        </geometry>
+      </collision>
+      <collision name="land_2">
+        <pose>-0.05 0.086 0 0 0 0</pose>
+        <geometry>
+          <sphere><radius>0.03</radius></sphere>
+        </geometry>
+      </collision>
+      <collision name="land_3">
+        <pose>-0.05 -0.086 0 0 0 0</pose>
+        <geometry>
+          <sphere><radius>0.03</radius></sphere>
+        </geometry>
+      </collision>
+
+      <visual name="body">
+        <geometry>
+          <cylinder><radius>0.08</radius><length>0.05</length></cylinder>
+        </geometry>
+        <material>
+          <ambient>1.0 0.6 0.4 1</ambient>
+          <diffuse>1.0 0.6 0.4 1</diffuse>
+        </material>
+      </visual>
+
+      <visual name="arm-1">
+        <pose>0.125 0 0 0 1.5708 0</pose>
+        <geometry>
+          <cylinder><radius>0.01</radius><length>0.25</length></cylinder>
+        </geometry>
+        <material>
+          <ambient>1.0 0.2 0.2 1</ambient>
+          <diffuse>1.0 0.2 0.2 1</diffuse>
+        </material>
+      </visual>
+      <visual name="arm-2">
+        <pose>0 0.125 0 0 1.5708 1.5708</pose>
+        <geometry>
+          <cylinder><radius>0.01</radius><length>0.25</length></cylinder>
+        </geometry>
+        <material>
+          <ambient>0.6 0.6 0.6 1</ambient>
+          <diffuse>0.6 0.6 0.6 1</diffuse>
+        </material>
+      </visual>
+      <visual name="arm-3">
+        <pose>-0.125 0 0 0 1.5708 0</pose>
+        <geometry>
+          <cylinder><radius>0.01</radius><length>0.25</length></cylinder>
+        </geometry>
+        <material>
+          <ambient>0.6 0.6 0.6 1</ambient>
+          <diffuse>0.6 0.6 0.6 1</diffuse>
+        </material>
+      </visual>
+      <visual name="arm-4">
+        <pose>0 -0.125 0 0 1.5708 1.5708</pose>
+        <geometry>
+          <cylinder><radius>0.01</radius><length>0.25</length></cylinder>
+        </geometry>
+        <material>
+          <ambient>0.6 0.6 0.6 1</ambient>
+          <diffuse>0.6 0.6 0.6 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- camera pointing 45° down/front -->
+      <sensor type="camera" name="camera">
+        <pose>0 0 -0.25 0 0.785 0</pose>
+        <camera>
+          <horizontal_fov>1.047</horizontal_fov>
+          <image>
+            <width>640</width>
+            <height>480</height>
+          </image>
+          <clip>
+            <near>0.1</near>
+            <far>100</far>
+          </clip>
+        </camera>
+        <always_on>1</always_on>
+        <update_rate>60</update_rate>
+        <visualize>true</visualize>
+      </sensor>
+    </link>
+
+    <include>
+      <uri>model://mrsim-rotor</uri>
+      <name>rotor-1</name>
+      <pose>0.23 0 0 0 0 0</pose>
+    </include>
+    <joint name="motor-1" type="revolute">
+      <parent>base</parent>
+      <child>rotor-1::propeller</child>
+      <axis><xyz>0 0 1</xyz></axis>
+    </joint>
+
+    <include>
+      <uri>model://mrsim-rotor</uri>
+      <name>rotor-2</name>
+      <pose>0 0.23 0 0 0 0</pose>
+    </include>
+    <joint name="motor-2" type="revolute">
+      <parent>base</parent>
+      <child>rotor-2::propeller</child>
+      <axis><xyz>0 0 1</xyz></axis>
+    </joint>
+
+    <include>
+      <uri>model://mrsim-rotor</uri>
+      <name>rotor-3</name>
+      <pose>-0.23 0 0 0 0 0</pose>
+    </include>
+    <joint name="motor-3" type="revolute">
+      <parent>base</parent>
+      <child>rotor-3::propeller</child>
+      <axis><xyz>0 0 1</xyz></axis>
+    </joint>
+
+    <include>
+      <uri>model://mrsim-rotor</uri>
+      <name>rotor-4</name>
+      <pose>0 -0.23 0 0 0 0</pose>
+    </include>
+    <joint name="motor-4" type="revolute">
+      <parent>base</parent>
+      <child>rotor-4::propeller</child>
+      <axis><xyz>0 0 1</xyz></axis>
+    </joint>
+
+    <plugin name="mrsim" filename="mrsim-gazebo.so">
+      <link>base</link>
+
+      <rotors>
+        <noise>0.03</noise>
+        <cf>6.5e-4</cf>
+        <ct>1e-5</ct>
+        <vfxy>0.5</vfxy><vfz>0.5</vfz>
+        <vtxy>0.5</vtxy><vtz>0.5</vtz>
+        <rotor><joint spin="cw">motor-1</joint></rotor>
+        <rotor><joint spin="ccw">motor-2</joint></rotor>
+        <rotor><joint spin="cw">motor-3</joint></rotor>
+        <rotor><joint spin="ccw">motor-4</joint></rotor>
+      </rotors>
+
+      <!-- optionnally specify an explicit allocation matrix -->
+      <!-- <allocation>
+         0.        0.       0.        0.
+         0.        0.       0.        0.
+         6.5e-4    6.5e-4   6.5e-4    6.5e-4
+         0.        1.495e-4 0.       -1.495e-4
+        -1.495e-4  0.       1.495e-4  0.
+         1e-5     -1e-5     1e-5     -1e-5
+      </allocation> -->
+    </plugin>
+</model>
+</sdf>

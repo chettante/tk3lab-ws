@@ -1,0 +1,59 @@
+
+python3 -i tk3-quadrotor-control.py 
+cd $TK3DOC_EXAMPLES/bin
+sh tk3-quadrotor-simulation.sh
+python3 -i tk3-quadrotor-control.py
+nhfc.set_position(1,0,1,0)
+
+# inside the Docker image
+$ python3 -m virtualenv ~/tk3lab-ws/venv
+# every time to enable it, you need to run
+$ source ~/tk3lab-ws/venv/bin/activate
+# to verify that the (local) Python interpreter is loaded
+$ which python3
+# which should print something like
+/shared-workspace/venv/bin/python3
+# from this moment on, you can install a pkg as
+$ pip install <pkg> [<pkg2> … <pkgN>]
+# for example, for recommended packages
+$ pip install numpy scipy matplotlib
+  env | grep '^TK3'
+  
+  # 1. Activate the project's Python virtual environment
+source ${TK3LAB_WS}/venv/bin/activate
+
+# 2. Make Gazebo aware of your custom models/worlds
+export GZ_SIM_RESOURCE_PATH=$GZ_SIM_RESOURCE_PATH:${TK3LAB_WS}/gazebo/models
+
+# 3. Make Gazebo aware of any custom plugins
+export GZ_SIM_SYSTEM_PLUGIN_PATH=$GZ_SIM_SYSTEM_PLUGIN_PATH:${TK3LAB_WS}/gazebo/plugins
+
+echo $GZ_SIM_RESOURCE_PATH` and `echo $GZ_SIM_SYSTEM_PLUGIN_PATH
+
+echo "sourced ${TK3LAB_WS}/.bashrc
+
+env | grep '^TK3'
+
+(venv) chetto@telekyb3:/shared-workspace/src/01a-model$ python3 simulation_assignment.py 
+Traceback (most recent call last):
+  File "/shared-workspace/src/01a-model/simulation_assignment.py", line 7, in <module>
+    client = genomix.connect("localhost:1509")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/openrobots/lib/python3.12/site-packages/genomix/server.py", line 38, in connect
+    return Handle(host)
+           ^^^^^^^^^^^^
+  File "/opt/openrobots/lib/python3.12/site-packages/genomix/server.py", line 53, in __init__
+    self.__http = http.Client(host)
+                  ^^^^^^^^^^^^^^^^^
+  File "/opt/openrobots/lib/python3.12/site-packages/genomix/http.py", line 48, in __init__
+    self.__sock = socket.create_connection((addr[0], port))
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/socket.py", line 852, in create_connection
+    raise exceptions[0]
+  File "/usr/lib/python3.12/socket.py", line 837, in create_connection
+    sock.connect(sa)
+ConnectionRefusedError: [Errno 111] Connection refused
+(venv) chetto@telekyb3:/shared-workspace/src/01a-model$ 
+
+
+
