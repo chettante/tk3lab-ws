@@ -1,6 +1,9 @@
-#
 import genomix
 import os
+import random
+import math
+import time
+
 
 # this connects to components running on the same host (localhost)
 g = genomix.connect()
@@ -12,23 +15,21 @@ g.rpath(os.environ['HOME'] + '/openrobots/lib/genom/pocolibs/plugins')
 
 # load components clients
 optitrack = g.load('optitrack')
-rotorcraft = g.load('rotorcraft')
-pom = g.load('pom')
-nhfc = g.load('nhfc')
-maneuver = g.load('maneuver')
+
+rotorcraft_l = g.load('rotorcraft', '-i', 'rotorcraft_1')
+rotorcraft_f = g.load('rotorcraft', '-i', 'rotorcraft_2')
+pom_l = g.load('pom', '-i', 'pom_1')
+pom_f = g.load('pom', '-i', 'pom_2')
+nhfc_l = g.load('nhfc', '-i', 'nhfc_1')
+nhfc_f = g.load('nhfc', '-i', 'nhfc_2')
+maneuver_l = g.load('maneuver', '-i', 'maneuver_1')
+maneuver_f = g.load('maneuver', '-i', 'maneuver_2')
 
 
-# configure components, to be called interactively
-def setup():
 
-  #############################################
-  #                OPTITRACK                  #
-  #############################################
-  
-  # connect to the simulated optitrack system on localhost
-  optitrack.connect({
-    'host': 'localhost', 'host_port': '1509', 'mcast': '', 'mcast_port': '0'
-  })
+def setup_one(rotorcraft, pom, nhfc, maneuver,
+              rc_name, pom_name, nhfc_name, maneuver_name,
+              serial, mocap_body):
 
   #############################################
   #                  MANEUVER                 #
@@ -36,7 +37,7 @@ def setup():
 
   # maneuver reads the current robot state from pom, same source as nhfc
   maneuver.connect_port({
-    'local': 'state', 'remote': 'pom/frame/robot'
+    'local': 'state', 'remote': pom_name + '/frame/robot'
   })
 
   # configure the free-space bounds within which trajectories can be planned
@@ -53,7 +54,7 @@ def setup():
   #############################################
 
   # connect to the simulated quadrotor
-  rotorcraft.connect({'serial': '/tmp/pty-qr4', 'baud': 0})
+  rotorcraft.connect({'serial': serial, 'baud': 0})
 
   # get IMU at 1kHz and motor data at 20Hz
   rotorcraft.set_sensor_rate({'rate': {
@@ -68,7 +69,7 @@ def setup():
 
   # read propellers velocities from nhfc controller
   rotorcraft.connect_port({
-    'local': 'rotor_input', 'remote': 'nhfc/rotor_input'
+    'local': 'rotor_input', 'remote': nhfc_name + '/rotor_input'
   })
 
 
@@ -89,7 +90,7 @@ def setup():
 
   # read planned trajectory reference from maneuver
   nhfc.connect_port({
-    'local': 'reference', 'remote': 'maneuver/desired'
+    'local': 'reference', 'remote': maneuver_name + '/desired'
   })
 
   # PID tuning
@@ -105,12 +106,12 @@ def setup():
 
   # read measured propeller velocities from rotorcraft
   nhfc.connect_port({
-    'local': 'rotor_measure', 'remote': 'rotorcraft/rotor_measure'
+    'local': 'rotor_measure', 'remote': rc_name + '/rotor_measure'
   })
 
   # read current state from pom
   nhfc.connect_port({
-    'local': 'state', 'remote': 'pom/frame/robot'
+    'local': 'state', 'remote': pom_name + '/frame/robot'
   })
 
 
@@ -131,45 +132,72 @@ def setup():
   }})
 
   # read IMU and magnetometers from rotorcraft
-  pom.connect_port({'local': 'measure/imu', 'remote': 'rotorcraft/imu'})
+  pom.connect_port({'local': 'measure/imu', 'remote': rc_name + '/imu'})
   pom.add_measurement('imu')
-  pom.connect_port({'local': 'measure/mag', 'remote': 'rotorcraft/mag'})
+  pom.connect_port({'local': 'measure/mag', 'remote': rc_name + '/mag'})
   pom.add_measurement('mag')
 
   # read position and orientation from optitrack
   pom.connect_port({
-    'local': 'measure/mocap', 'remote': 'optitrack/bodies/QR_4'
+    'local': 'measure/mocap', 'remote': 'optitrack/bodies/' + mocap_body
   })
   pom.add_measurement('mocap')
 
 
+# configure both quadrotors, to be called interactively
+def setup():
+
+  #############################################
+  #                OPTITRACK                  #
+  #############################################
+  #
+  # optitrack is a single shared system: connect it once, it streams all bodies
+  optitrack.connect({
+    'host': 'localhost', 'host_port': '1509', 'mcast': '', 'mcast_port': '0'
+  })
+
+  # leader
+  setup_one(rotorcraft_l, pom_l, nhfc_l, maneuver_l,
+            'rotorcraft_1', 'pom_1', 'nhfc_1', 'maneuver_1',
+            '/tmp/pty-qr4_leading', 'QR4_leading')
+
+  # follower  (adjust serial device and mocap body name to your setup)
+  setup_one(rotorcraft_f, pom_f, nhfc_f, maneuver_f,
+            'rotorcraft_2', 'pom_2', 'nhfc_2', 'maneuver_2',
+            '/tmp/pty-qr4_following', 'QR4_following')
+
+
 # --- start ----------------------------------------------------------------
 #
-# Spin the motors and servo on current position. To be called interactively
-def start():
-  pom.log_state('/tmp/pom.log')
-  pom.log_measurements('/tmp/pom-measurements.log')
+# Spin the motors and servo on current position for one drone. The 'tag'
+# keeps the per-drone log files separate.
+def start_one(rotorcraft, pom, nhfc, maneuver, tag):
+  pom.log_state('/tmp/pom_%s.log' % tag)
+  pom.log_measurements('/tmp/pom-measurements_%s.log' % tag)
 
-  optitrack.set_logfile('/tmp/opti.log')
-
-  rotorcraft.log('/tmp/rotorcraft.log')
+  rotorcraft.log('/tmp/rotorcraft_%s.log' % tag)
   rotorcraft.start()
   rotorcraft.servo(ack=True) # this runs until stopped or input error
 
-  nhfc.log('/tmp/nhfc.log')
+  nhfc.log('/tmp/nhfc_%s.log' % tag)
   #nhfc.set_current_position() # hover on current position
   nhfc.servo(ack=True)       # start nhfc's own control loop (reads state+reference, drives rotor_input)
 
-
-
-
-  maneuver.log('/tmp/maneuver.log')
+  maneuver.log('/tmp/maneuver_%s.log' % tag)
   maneuver.set_current_state() # this runs until stopped or input error
+
+
+# Spin the motors and servo on current position. To be called interactively
+def start():
+  optitrack.set_logfile('/tmp/opti.log')
+
+  start_one(rotorcraft_l, pom_l, nhfc_l, maneuver_l, 'leader')
+  start_one(rotorcraft_f, pom_f, nhfc_f, maneuver_f, 'follower')
 
 # --- stop -----------------------------------------------------------------
 #
-# Stop motors. To be called interactively
-def stop():
+# Stop motors for one drone.
+def stop_one(rotorcraft, pom, nhfc, maneuver):
   rotorcraft.stop()
   rotorcraft.log_stop()
 
@@ -180,7 +208,72 @@ def stop():
 
   pom.log_stop()
 
+
+# Stop motors. To be called interactively
+def stop():
+  stop_one(rotorcraft_l, pom_l, nhfc_l, maneuver_l)
+  stop_one(rotorcraft_f, pom_f, nhfc_f, maneuver_f)
+
   optitrack.unset_logfile()
+
+
+def not_random_trajectory(n_points=10):
+  maneuver_f.waypoint({
+    'x': 1, 'y': 1, 'z': 3, 'yaw': 0, 'duration': 10,
+    'vx': 1, 'vy': 1, 'vz': 1, 'wz': 0, 'ax': 1, 'ay': 1, 'az': 1
+  })
+  maneuver_f.waypoint({
+    'x': 0, 'y': 0, 'z': 0, 'yaw': 0, 'duration': 10,
+    'vx': 0, 'vy': 0, 'vz': 0, 'wz': 0, 'ax': 0, 'ay': 0, 'az': 0
+  })
+  
+  maneuver_f.wait()
+
+
+def random_trajectory(n_points):
+  for i in range(n_points):
+    maneuver_l.waypoint({
+      'x': random.uniform(-5, 5), 
+      'y': random.uniform(-5, 5),
+      'z': random.uniform(0, 5), 
+      'yaw': 0,
+      'duration': 15,
+      'vx': 1, 
+      'vy': 1,
+      'vz': 1, 
+      'wz': 0,
+      'ax': 1,
+      'ay': 1,
+      'az': 1
+    })
+
+    maneuver_f.waypoint({
+        'x': random.uniform(-5, 5), 
+        'y': random.uniform(-5, 5),
+        'z': random.uniform(0, 5), 
+        'yaw': 0,
+        'duration': 15,
+        'vx': 1, 
+        'vy': 1,
+        'vz': 1, 
+        'wz': 0,
+        'ax': 1,
+        'ay': 1,
+        'az': 1
+      })
+
+  maneuver_f.waypoint({
+      'x': 0, 'y': 0, 'z': 0, 'yaw': 0, 'duration': 10,
+      'vx': 0, 'vy': 0, 'vz': 0, 'wz': 0, 'ax': 0, 'ay': 0, 'az': 0
+    })
+
+  maneuver_l.waypoint({
+      'x': 2, 'y': 2, 'z': 0, 'yaw': 0, 'duration': 10,
+      'vx': 0, 'vy': 0, 'vz': 0, 'wz': 0, 'ax': 0, 'ay': 0, 'az': 0
+    })
+  
+  maneuver_l.wait()
+  maneuver_f.wait()
 
 
 ## interactively, one can start the simulation with

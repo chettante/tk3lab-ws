@@ -60,8 +60,14 @@
 
     <include>
       <uri>model://mrsim-quadrotor</uri>
-      <name>qr4</name>
+      <name>qr4_leading</name>
       <pose>-1 0 0.025 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://mrsim-quadrotor</uri>
+      <name>qr4_following</name>
+      <pose>-3 0 0.025 0 0 0</pose>
     </include>
 
     <plugin name="gz::sim::systems::Sensors" filename="gz-sim-sensors-system">
@@ -72,12 +78,12 @@
       <hz>100</hz>
       <port>1509</port>
       <publish>
-        <link>hr6::base</link>
-        <name>HR_6</name>
+        <link>qr4_following::base</link>
+        <name>QR4_following</name>
       </publish>
       <publish>
-        <link>qr4::base</link>
-        <name>QR_4</name>
+        <link>qr4_leading::base</link>
+        <name>QR4_leading</name>
       </publish>
     </plugin>
   </world>

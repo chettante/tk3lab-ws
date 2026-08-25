@@ -3,7 +3,7 @@
 
 # select the used middleware and the gazebo world file to use
 middleware=pocolibs
-gz_world=~/tk3lab-ws/gazebo/worlds/example.world
+gz_world=/opt/openrobots/share/gazebo/worlds/example.world
 
 # Genom3 components to run
 components="
@@ -11,7 +11,6 @@ components="
   pom
   optitrack
   rotorcraft
-  maneuver
 "
 
 # list of process ids to clean, populated after each spawn
