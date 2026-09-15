@@ -278,6 +278,21 @@ def compute_follower_target_3d(P_leader, P_follower, step):
               P_follower['z'] + s_eff * uz)
     return target
 
+def compute_follower_velocity_target_3d(P_leader, P_follower, vmax):
+    dx = P_leader['x'] - P_follower['x']
+    dy = P_leader['y'] - P_follower['y']
+    dz = P_leader['z'] - P_follower['z']
+    dist = math.sqrt(dx**2 + dy**2 + dz**2)
+
+    if dist == 0:
+        return P_follower  # leader e follower coincidono
+    
+    ux, uy, uz = dx / dist, dy / dist, dz / dist
+    target = (vmax * ux, 
+              vmax * uy, 
+              vmax * uz)
+    return target
+
 
 ## interactively, one can start the simulation with
 # setup()

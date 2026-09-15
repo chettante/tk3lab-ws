@@ -3,6 +3,13 @@ from functions import *
 setup()
 start()
 random_trajectory(n_points=3)
+vmax = 1
+maneuver_f.set_velocity_limit(vmax, 1)
+f_limits = maneuver_f.get_limits()
+# print("Follower limits: ", f_limits)
+maneuver_l.set_velocity_limit(1, 1)
+l_limits = maneuver_l.get_limits()
+# print("Leader limits: ", l_limits)
 PERIOD = 0.1  # seconds
 next_t = time.monotonic()
 while True:  # run for 30 seconds
@@ -13,9 +20,10 @@ while True:  # run for 30 seconds
     pos_follower = follower['bodies']['pos']
     print("Leader position: ", pos_leader)
     print("Follower position: ", pos_follower)
-    target = compute_follower_target_3d(pos_leader, pos_follower, step=0.5)
+    target = compute_follower_velocity_target_3d(pos_leader, pos_follower, vmax)
     print("Follower target: ", target)
-    maneuver_f.goto(target[0], target[1], target[2], 0, 0)
+    maneuver_f.velocity(target[0], target[1], target[2], 1, 1, 1, 1, 0)
+    pos_leader_prev = pos_leader
 
     # schedule the next tick and sleep only the remaining time
     next_t += PERIOD
