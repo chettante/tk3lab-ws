@@ -217,63 +217,66 @@ def stop():
   optitrack.unset_logfile()
 
 
-def not_random_trajectory(n_points=10):
-  maneuver_f.waypoint({
-    'x': 1, 'y': 1, 'z': 3, 'yaw': 0, 'duration': 10,
-    'vx': 1, 'vy': 1, 'vz': 1, 'wz': 0, 'ax': 1, 'ay': 1, 'az': 1
-  })
-  maneuver_f.waypoint({
-    'x': 0, 'y': 0, 'z': 0, 'yaw': 0, 'duration': 10,
-    'vx': 0, 'vy': 0, 'vz': 0, 'wz': 0, 'ax': 0, 'ay': 0, 'az': 0
-  })
-  
-  maneuver_f.wait()
-
 
 def random_trajectory(n_points):
   for i in range(n_points):
     maneuver_l.waypoint({
-      'x': random.uniform(-5, 5), 
+      'x': random.uniform(-5, 5),
       'y': random.uniform(-5, 5),
-      'z': random.uniform(0, 5), 
+      'z': random.uniform(0, 5),
       'yaw': 0,
       'duration': 15,
-      'vx': 1, 
+      'vx': 1,
       'vy': 1,
-      'vz': 1, 
+      'vz': 1,
       'wz': 0,
       'ax': 1,
       'ay': 1,
       'az': 1
     })
 
-    maneuver_f.waypoint({
-        'x': random.uniform(-5, 5), 
-        'y': random.uniform(-5, 5),
-        'z': random.uniform(0, 5), 
-        'yaw': 0,
-        'duration': 15,
-        'vx': 1, 
-        'vy': 1,
-        'vz': 1, 
-        'wz': 0,
-        'ax': 1,
-        'ay': 1,
-        'az': 1
-      })
+    #maneuver_f.waypoint({
+    #    'x': random.uniform(-5, 5),
+    #    'y': random.uniform(-5, 5),
+    #    'z': random.uniform(0, 5),
+    #    'yaw': 0,
+    #    'duration': 15,
+    #    'vx': 1,
+    #    'vy': 1,
+    #    'vz': 1,
+    #    'wz': 0,
+    #    'ax': 1,
+    #    'ay': 1,
+    #    'az': 1
+    #  })
 
-  maneuver_f.waypoint({
-      'x': 0, 'y': 0, 'z': 0, 'yaw': 0, 'duration': 10,
-      'vx': 0, 'vy': 0, 'vz': 0, 'wz': 0, 'ax': 0, 'ay': 0, 'az': 0
-    })
+  #maneuver_f.waypoint({
+  #    'x': 0, 'y': 0, 'z': 0, 'yaw': 0, 'duration': 10,
+  #    'vx': 0, 'vy': 0, 'vz': 0, 'wz': 0, 'ax': 0, 'ay': 0, 'az': 0
+  #  })
 
   maneuver_l.waypoint({
       'x': 2, 'y': 2, 'z': 0, 'yaw': 0, 'duration': 10,
       'vx': 0, 'vy': 0, 'vz': 0, 'wz': 0, 'ax': 0, 'ay': 0, 'az': 0
     })
-  
-  maneuver_l.wait()
-  maneuver_f.wait()
+
+
+def compute_follower_target_3d(P_leader, P_follower, step):
+    dx = P_leader['x'] - P_follower['x']
+    dy = P_leader['y'] - P_follower['y']
+    dz = P_leader['z'] - P_follower['z']
+    dist = math.sqrt(dx**2 + dy**2 + dz**2)
+
+    if dist == 0:
+        return P_follower  # leader e follower coincidono
+
+    ux, uy, uz = dx / dist, dy / dist, dz / dist
+    s_eff = min(step, dist)  # non superare il leader
+
+    target = (P_follower['x'] + s_eff * ux,
+              P_follower['y'] + s_eff * uy,
+              P_follower['z'] + s_eff * uz)
+    return target
 
 
 ## interactively, one can start the simulation with
