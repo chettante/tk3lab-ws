@@ -12,6 +12,9 @@ from camera import *
 
 
 def main():
+    
+
+
     """Main loop per demo FOV + tracking"""
     
     print("[*] Setup...")
@@ -32,9 +35,12 @@ def main():
     tracker = TrackingController(
         follower=maneuver_f,
         kp=0.1,  # Guadagno controllo
-        velocity_estimator=VelocityEstimator(window_size=5, alpha=0.7)
+        velocity_estimator = VelocityEstimator(window_size=10, alpha=0.9)
     )
     
+
+
+   
     # Imposta limiti di velocità
     vmax = 10.0  # m/s
     maneuver_f.set_velocity_limit(vmax, 1)
@@ -53,7 +59,7 @@ def main():
     # Statistiche
     in_fov_count = 0
     out_fov_count = 0
-    
+    pom_l.log_state('//home/matteogiovanelli/tk3lab-ws/src/final_project/pom.log')
     try:
         while loop_count < max_loops:
             loop_start = time.monotonic()
@@ -127,6 +133,10 @@ def main():
                 out_fov_count += 1
                 if loop_count % 10 == 0:  # Stampa ogni 10 cicli per non spammare
                     print(f"[{loop_count:03d}] ✗ Leader NOT in FOV - Distance: {distance:6.2f}m")
+                
+                # Aggiorna stima velocità del leader (ORA LOGGA ANCHE QUANDO NON è in FOV)
+                leader_vel = tracker.velocity_estimator.update(pos_leader)
+                print(f"      Leader vel (est): [{leader_vel[0]:7.2f}, {leader_vel[1]:7.2f}, {leader_vel[2]:7.2f}]")
             
             # ===== STEP 5: Rate limiting =====
             next_t += PERIOD
@@ -154,9 +164,14 @@ def main():
             maneuver_l.wait()
         except:
             pass
+       
         stop()
+        
         print("[+] Done")
-
+    
 
 if __name__ == "__main__":
+    
     main()
+    pom_l.log_stop()
+    
