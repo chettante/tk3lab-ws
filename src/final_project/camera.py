@@ -69,74 +69,123 @@ class FOVPyramid:
             return 0.0
         cos_angle = np.clip(point_in_body_frame[0] / distance, -1.0, 1.0)
         return np.arccos(cos_angle)
+    
+    def get_yaw_error(self, pos_relative, follower_yaw=0.0):
+        """
+        Calcola errore di heading: quanto ruotare per centrare il leader
+        
+        Args:
+            pos_relative: [dx, dy, dz] posizione leader nel frame globale
+                        (non body frame!)
+            follower_yaw: orientamento attuale del follower (radianti)
+        
+        Returns:
+            yaw_error: angolo di rotazione (radianti)
+                    positivo = ruota CCW (left)
+                    negativo = ruota CW (right)
+        """
+        # Angolo del leader rispetto al follower
+        leader_angle = np.arctan2(pos_relative[1], pos_relative[0])
+        
+        # Errore = dove dovrebbe guardare - dove guarda
+        yaw_error = leader_angle - follower_yaw
+        
+        # Limita in [-π, π]
+        yaw_error = np.arctan2(np.sin(yaw_error), np.cos(yaw_error))
+        
+        return yaw_error
+
+    def global_to_body(self, pos_leader: np.ndarray, pos_follower: np.ndarray, follower_yaw: float) -> np.ndarray:
+        """Trasforma la posizione relativa dal Frame Globale al Body Frame del follower."""
+        pos_rel = pos_leader - pos_follower
+        cos_y, sin_y = np.cos(follower_yaw), np.sin(follower_yaw)
+        
+        R_w2b = np.array([
+            [ cos_y,  sin_y, 0.0],
+            [-sin_y,  cos_y, 0.0],
+            [   0.0,    0.0, 1.0]
+        ])
+        return R_w2b @ pos_rel
 
 
 class TrackingController:
-    """Image-Based Visual Servoing (IBVS) con predizione"""
+    """Image-Based Visual Servoing (IBVS) con predizione + controllo angolare"""
  
     def __init__(
         self,
         follower,
-        kp: float = 0.5,
+        kp: float = 0.1,
         velocity_estimator: Optional[VelocityEstimator] = None,
     ):
         """
         Args:
             follower: maneuver component per il follower (maneuver_f)
-            kp: guadagno proporzionale (0.3-0.7)
+            kp: guadagno proporzionale distanza (0.1-0.3)
             velocity_estimator: stimatore di velocità del leader
         """
         self.follower = follower
         self.kp = kp
         self.velocity_estimator = velocity_estimator or VelocityEstimator()
         self.last_command_time = time.time()
-        self.command_period = 0.05  # 20 Hz
+        self.command_period = 0.05  # 20 Hz limit
  
-    def compute_command(
+    def compute_command_with_angular_control(
         self,
-        leader_pos: np.ndarray,
-        follower_pos: np.ndarray,
-        leader_vel: Optional[np.ndarray] = None,
-    ) -> np.ndarray:
+        leader_pos,
+        follower_pos,
+        follower_yaw,
+        camera,
+        leader_vel=None,
+        kp_distance=0.1,
+        kp_angle=0.5
+    ):
         """
-        Calcola il comando di velocità via visual servoing.
- 
-        Args:
-            leader_pos: posizione assoluta del leader
-            follower_pos: posizione assoluta del follower
-            leader_vel: velocità stimata del leader (opzionale)
- 
-        Returns:
-            velocity_command: [vx, vy, vz] da inviare via maneuver.velocity()
-        """
-        # Conversione a numpy array se necessario
-        if not isinstance(leader_pos, np.ndarray):
-            leader_pos = np.array(leader_pos)
-        if not isinstance(follower_pos, np.ndarray):
-            follower_pos = np.array(follower_pos)
+        Controllo ibrido: distanza + heading alignment
         
-        # Posizione relativa nel frame globale
+        Args:
+            leader_pos: posizione assoluta leader
+            follower_pos: posizione assoluta follower
+            follower_yaw: orientamento follower (rad) da mocap
+            camera: FOVPyramid instance
+            leader_vel: velocità stimata leader (optional)
+            kp_distance: guadagno controllo distanza (0.1-0.3)
+            kp_angle: guadagno controllo yaw (0.5-2.0)
+        
+        Returns:
+            velocity_cmd: [vx, vy, vz] m/s
+            yaw_cmd: velocità angolare wz (rad/s)
+        """
+        
+        # ===== CONTROLLO DISTANZA =====
         relative_pos = leader_pos - follower_pos
         
-        # Proporzionale puro
-        velocity_cmd = self.kp * relative_pos
- 
-        # Feedforward della velocità predetta del leader
+        # Proporzionale sulla distanza
+        velocity_cmd = kp_distance * relative_pos
+        
+        # Feedforward velocità leader
         if leader_vel is not None:
-            if not isinstance(leader_vel, np.ndarray):
-                leader_vel = np.array(leader_vel)
-            
-            prediction_horizon = 0.1  # 100 ms
-            velocity_cmd += 0.5 * leader_vel * prediction_horizon
+            velocity_cmd += 0.5 * leader_vel * 0.1
+        
+        # ===== CONTROLLO ANGOLARE =====
+        # Calcola errore di heading usando il metodo della camera
+        yaw_error = camera.get_yaw_error(relative_pos, follower_yaw)
+        
+        # Controllo proporzionale su yaw
+        yaw_cmd = kp_angle * yaw_error
+        
+        # Saturazione yaw (max rotazione 1.0 rad/s)
+        yaw_cmd = np.clip(yaw_cmd, -1.0, 1.0)
+        
+        return velocity_cmd, yaw_cmd
  
-        return velocity_cmd
- 
-    def send_command(self, velocity_cmd: np.ndarray):
+    def send_command(self, velocity_cmd: np.ndarray, yaw_cmd: float = 0.0, max_velocity: float = 1.0):
         """
         Invia il comando al drone follower via maneuver.velocity()
         
         Args:
-            velocity_cmd: [vx, vy, vz] velocità da inviare (m/s)
+            velocity_cmd: [vx, vy, vz] velocità lineare (m/s)
+            yaw_cmd: velocità angolare wz (rad/s)
+            max_velocity: limite di velocità massima (m/s)
         """
         current_time = time.time()
         
@@ -150,18 +199,24 @@ class TrackingController:
             if not isinstance(velocity_cmd, np.ndarray):
                 velocity_cmd = np.array(velocity_cmd)
             
-            # Invia comando via maneuver.velocity()
+            # Saturazione velocità lineare
+            cmd_magnitude = np.linalg.norm(velocity_cmd)
+            if cmd_magnitude > max_velocity:
+                velocity_cmd = (velocity_cmd / cmd_magnitude) * max_velocity
+                logger.debug(f"Velocity saturated to {max_velocity:.2f} m/s")
+            
+            # Parametri POSIZIONALI: vx, vy, vz, ax, ay, az, duration, wz
             self.follower.velocity(
-                vx=float(velocity_cmd[0]),
-                vy=float(velocity_cmd[1]),
-                vz=float(velocity_cmd[2]),
-                wz=0.0,                    # No yaw control
-                ax=0.0, ay=0.0, az=0.0,   # No acceleration
-                duration=1              # Refresh rate
+                vx=float(velocity_cmd[0]),  # vx
+                vy=float(velocity_cmd[1]),  # vy
+                vz=float(velocity_cmd[2]),  # vz
+                wz=float(yaw_cmd),  # wz
+                ax=2.0, ay=2.0, az=2.0,          # ax, ay, az (accelerazione per planner)
+                duration=0.0,                     # duration (1 secondo)
             )
             logger.debug(
-                f"Velocity cmd sent: vx={velocity_cmd[0]:.2f}, "
-                f"vy={velocity_cmd[1]:.2f}, vz={velocity_cmd[2]:.2f}"
+                f"Command sent: v=[{velocity_cmd[0]:.2f}, {velocity_cmd[1]:.2f}, {velocity_cmd[2]:.2f}] m/s, "
+                f"wz={yaw_cmd:.2f} rad/s"
             )
         except Exception as e:
-            logger.error(f"Error sending velocity command: {e}")
+            logger.error(f"Error sending command: {e}")
