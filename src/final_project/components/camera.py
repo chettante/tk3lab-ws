@@ -2,7 +2,7 @@ import numpy as np
 import time
 import logging
 from typing import Optional
-from velocity_estimator import VelocityEstimator
+from final_project.components.velocity_estimator import VelocityEstimator
 
 
 logger = logging.getLogger("FOVCamera")

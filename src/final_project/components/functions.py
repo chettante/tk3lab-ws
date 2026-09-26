@@ -2,7 +2,7 @@ import genomix
 import os
 import random
 import math
-import time
+import numpy as np 
 
 
 # this connects to components running on the same host (localhost)
@@ -27,14 +27,9 @@ maneuver_f = g.load('maneuver', '-i', 'maneuver_2')
 
 
 
-def setup_one(rotorcraft, pom, nhfc, maneuver,
+def setup_f(rotorcraft, pom, nhfc, maneuver,
               rc_name, pom_name, nhfc_name, maneuver_name,
               serial, mocap_body):
-
-  #############################################
-  #                  MANEUVER                 #
-  #############################################
-
   # maneuver reads the current robot state from pom, same source as nhfc
   maneuver.connect_port({
     'local': 'state', 'remote': pom_name + '/frame/robot'
@@ -143,6 +138,116 @@ def setup_one(rotorcraft, pom, nhfc, maneuver,
   })
   pom.add_measurement('mocap')
 
+def setup_l(rotorcraft, pom, nhfc, maneuver,
+              rc_name, pom_name, nhfc_name, maneuver_name,
+              serial, mocap_body):
+  # maneuver reads the current robot state from pom, same source as nhfc
+  maneuver.connect_port({
+    'local': 'state', 'remote': pom_name + '/frame/robot'
+  })
+
+  # configure the free-space bounds within which trajectories can be planned
+  maneuver.set_bounds({
+      'xmin': -10, 'xmax': 10,
+      'ymin': -10, 'ymax': 10,
+      'zmin': 0,   'zmax': 10,
+      'yawmin': -3.14, 'yawmax': 3.14
+  })
+
+
+  #############################################
+  #                ROTORCRAFT                 #
+  #############################################
+
+  # connect to the simulated quadrotor
+  rotorcraft.connect({'serial': serial, 'baud': 0})
+
+  # get IMU at 1kHz and motor data at 20Hz
+  rotorcraft.set_sensor_rate({'rate': {
+    'imu': 1000, 'mag': 0, 'motor': 20, 'battery': 1
+  }})
+
+  # Filter IMU: 20Hz cut-off frequency for gyroscopes and 5Hz for
+  # accelerometers. This is important for cancelling vibrations.
+  rotorcraft.set_imu_filter({
+    'gfc': [20, 20, 20], 'afc': [5, 5, 5], 'mfc': [20, 20, 20]
+  })
+
+  # read propellers velocities from nhfc controller
+  rotorcraft.connect_port({
+    'local': 'rotor_input', 'remote': nhfc_name + '/rotor_input'
+  })
+
+
+  #############################################
+  #                   NHFC                    #
+  #############################################
+  #
+  # configure quadrotor geometry: 4 rotors, not tilted, 23cm arms, needed to compute the allocation matrix
+  nhfc.set_gtmrp_geom({
+    'rotors': 4, 'cx': 0, 'cy': 0, 'cz': 0, 'armlen': 0.23, 'mass': 1.28,
+    'rx':0, 'ry': 0, 'rz': -1, 'cf': 6.5e-4, 'ct': 1e-5
+  })
+
+  # emergency descent parameters
+  nhfc.set_emerg({'emerg': {
+    'descent': 0.1, 'dx': 0.5, 'dq': 1, 'dv': 3, 'dw': 3
+  }})
+
+  # read planned trajectory reference from maneuver
+  nhfc.connect_port({
+    'local': 'reference', 'remote': maneuver_name + '/desired'
+  })
+
+  # PID tuning
+  nhfc.set_saturation({'sat': {'x': 1, 'v': 1, 'ix': 0}})
+  nhfc.set_servo_gain({ 'gain': {
+    'Kpxy': 5, 'Kpz': 5, 'Kqxy': 4, 'Kqz': 0.1,
+    'Kvxy': 6, 'Kvz': 6, 'Kwxy': 1, 'Kwz': 0.1,
+    'Kixy': 0, 'Kiz': 0
+  }})
+
+  # use tilt-prioritized controller
+  nhfc.set_control_mode({'att_mode': '::nhfc::tilt_prioritized'})
+
+  # read measured propeller velocities from rotorcraft
+  nhfc.connect_port({
+    'local': 'rotor_measure', 'remote': rc_name + '/rotor_measure'
+  })
+
+  # read current state from pom
+  nhfc.connect_port({
+    'local': 'state', 'remote': pom_name + '/frame/robot'
+  })
+
+
+  #############################################
+  #                    POM                    #
+  #############################################
+  #
+  # configure kalman filter
+  pom.set_prediction_model('::pom::constant_acceleration')
+  pom.set_process_noise({'max_jerk': 100, 'max_dw': 50})
+
+  # allow sensor data up to 250ms old
+  pom.set_history_length({'history_length': 0.25})
+
+  # configure magnetic field
+  pom.set_mag_field({'magdir': {
+    'x': 23.8e-06, 'y': -0.4e-06, 'z': -39.8e-06
+  }})
+
+  # read IMU and magnetometers from rotorcraft
+  pom.connect_port({'local': 'measure/imu', 'remote': rc_name + '/imu'})
+  pom.add_measurement('imu')
+  pom.connect_port({'local': 'measure/mag', 'remote': rc_name + '/mag'})
+  pom.add_measurement('mag')
+
+  # read position and orientation from optitrack
+  pom.connect_port({
+    'local': 'measure/mocap', 'remote': 'optitrack/bodies/' + mocap_body
+  })
+  pom.add_measurement('mocap')
 
 # configure both quadrotors, to be called interactively
 def setup():
@@ -157,12 +262,12 @@ def setup():
   })
 
   # leader
-  setup_one(rotorcraft_l, pom_l, nhfc_l, maneuver_l,
+  setup_l(rotorcraft_l, pom_l, nhfc_l, maneuver_l,
             'rotorcraft_1', 'pom_1', 'nhfc_1', 'maneuver_1',
             '/tmp/pty-qr4_leading', 'QR4_leading')
 
   # follower  (adjust serial device and mocap body name to your setup)
-  setup_one(rotorcraft_f, pom_f, nhfc_f, maneuver_f,
+  setup_f(rotorcraft_f, pom_f, nhfc_f, maneuver_f,
             'rotorcraft_2', 'pom_2', 'nhfc_2', 'maneuver_2',
             '/tmp/pty-qr4_following', 'QR4_following')
 
@@ -262,37 +367,45 @@ def random_trajectory(n_points):
 
 
 def compute_follower_target_3d(P_leader, P_follower, step):
-    dx = P_leader['x'] - P_follower['x']
-    dy = P_leader['y'] - P_follower['y']
-    dz = P_leader['z'] - P_follower['z']
-    dist = math.sqrt(dx**2 + dy**2 + dz**2)
+  dx = P_leader['x'] - P_follower['x']
+  dy = P_leader['y'] - P_follower['y']
+  dz = P_leader['z'] - P_follower['z']
+  dist = math.sqrt(dx**2 + dy**2 + dz**2)
 
-    if dist == 0:
-        return P_follower  # leader e follower coincidono
+  if dist == 0:
+    return P_follower  # leader e follower coincidono
 
-    ux, uy, uz = dx / dist, dy / dist, dz / dist
-    s_eff = min(step, dist)  # non superare il leader
+  ux, uy, uz = dx / dist, dy / dist, dz / dist
+  s_eff = min(step, dist)  # non superare il leader
 
-    target = (P_follower['x'] + s_eff * ux,
-              P_follower['y'] + s_eff * uy,
-              P_follower['z'] + s_eff * uz)
-    return target
+  target = (P_follower['x'] + s_eff * ux,
+            P_follower['y'] + s_eff * uy,
+            P_follower['z'] + s_eff * uz)
+  return target
 
 def compute_follower_velocity_target_3d(P_leader, P_follower, vmax):
-    dx = P_leader['x'] - P_follower['x']
-    dy = P_leader['y'] - P_follower['y']
-    dz = P_leader['z'] - P_follower['z']
-    dist = math.sqrt(dx**2 + dy**2 + dz**2)
+  dx = P_leader['x'] - P_follower['x']
+  dy = P_leader['y'] - P_follower['y']
+  dz = P_leader['z'] - P_follower['z']
+  dist = math.sqrt(dx**2 + dy**2 + dz**2)
 
-    if dist == 0:
-        return P_follower  # leader e follower coincidono
-    
-    ux, uy, uz = dx / dist, dy / dist, dz / dist
-    target = (vmax * ux, 
-              vmax * uy, 
-              vmax * uz)
-    return target
+  if dist == 0:
+      return P_follower  # leader e follower coincidono
+  
+  ux, uy, uz = dx / dist, dy / dist, dz / dist
+  target = (vmax * ux, 
+            vmax * uy, 
+            vmax * uz)
+  return target
 
+def _quat_to_yaw(quat):
+  """Converte quaternione a yaw"""
+  qw, qx, qy, qz = quat
+  yaw = np.arctan2(
+    2 * (qw * qz + qx * qy),
+    1 - 2 * (qy**2 + qz**2)
+  )
+  return yaw
 
 ## interactively, one can start the simulation with
 # setup()
