@@ -56,6 +56,7 @@ class TrackingState:
         
         self.enter_time = None
         self.last_fov_time = None
+        self.wasnt_in_fov = True
         
         self.loop_count = 0
         self.in_fov_count = 0
@@ -96,10 +97,9 @@ class TrackingState:
         if is_in_fov:
             self.in_fov_count += 1
             self.last_fov_time = time.time()  # Reset del timer di presenza nel FOV
-            wasnt_in_fov = False
 
             # Aggiorna stima velocità leader
-            leader_vel, wasnt_in_fov = self.tracker.velocity_estimator.update(leader_pos, wasnt_in_fov)
+            leader_vel, self.wasnt_in_fov = self.tracker.velocity_estimator.update(leader_pos, self.wasnt_in_fov)
 
             # Calcola comando con controllo distanza + angolo
             velocity_cmd, yaw_cmd = self.tracker.compute_command_with_angular_control(
@@ -118,7 +118,8 @@ class TrackingState:
                 yaw_cmd=yaw_cmd,
                 max_velocity=self.max_velocity,
             )
-
+            
+            self.wasnt_in_fov = False
             if self.loop_count % 20 == 0:
                 dist = np.linalg.norm(pos_in_body)
                 logger.debug(

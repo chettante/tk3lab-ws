@@ -32,6 +32,7 @@ from final_project.state_machine.state_machine import StateMachine, StateType
 from final_project.state_machine.state_idle import IdleState
 from final_project.state_machine.state_tracking import TrackingState
 from final_project.state_machine.state_searching import SearchingState
+from final_project.components.trajectory_handler import *
 
 # Setup logging
 logging.basicConfig(
@@ -62,8 +63,9 @@ CONFIG = {
     'out_of_fov_timeout': 0.2,
     
     # Main loop
-    'control_loop_period': 0.1,  # 10 Hz
-    'max_loops': 3000,
+    # Deve coincidere con il campionamento della traiettoria del leader.
+    'control_loop_period': 0.05,  # 20 Hz
+    'max_loops': 1000,
 }
 
 # ============================================================================
@@ -157,8 +159,19 @@ def main():
     loop_count = 0
     next_t = time.monotonic()
     PERIOD = CONFIG['control_loop_period']
+    maneuver_l.goto(-1,0,1,0,0)
+
+    # select the trajectory for the leader
+    th = TrajectoryHandler(
+        period=PERIOD,
+        duration=40.0,
+        position_reader=optitrack_reader,
+    )
 
     while loop_count < CONFIG['max_loops']:
+        # Aggiorna la traiettoria del leader
+        th.update_trajectory(maneuver_l)
+
         # Esegui ciclo di update della state machine
         current_state = sm.get_current_state()
         sm.update()
@@ -178,6 +191,7 @@ def main():
         loop_count += 1
 
     stop()
+    th.plot_trajectories()
     logger.info("[+] Drone chase control finished")
 
 

@@ -164,7 +164,7 @@ class TrackingController:
         
         # Feedforward velocità leader
         if leader_vel is not None:
-            velocity_cmd += 0.5 * leader_vel * 0.1
+            velocity_cmd += leader_vel
         
         # ===== CONTROLLO ANGOLARE =====
         # Calcola errore di heading usando il metodo della camera
