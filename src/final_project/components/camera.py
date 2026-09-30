@@ -2,6 +2,7 @@ import numpy as np
 import time
 import logging
 from typing import Optional
+from genomix.event import GenoMError
 from final_project.components.velocity_estimator import VelocityEstimator
 
 
@@ -109,114 +110,98 @@ class FOVPyramid:
 
 
 class TrackingController:
-    """Image-Based Visual Servoing (IBVS) con predizione + controllo angolare"""
- 
-    def __init__(
-        self,
-        follower,
-        kp: float = 0.1,
-        velocity_estimator: Optional[VelocityEstimator] = None,
-    ):
-        """
-        Args:
-            follower: maneuver component per il follower (maneuver_f)
-            kp: guadagno proporzionale distanza (0.1-0.3)
-            velocity_estimator: stimatore di velocità del leader
-        """
+    """
+    Il follower tiene il leader centrato nel FOV: yaw puntato sul leader (bearing),
+    posizione follow_distance dietro al leader lungo il bearing, alla stessa quota.
+    """
+
+    def __init__(self, follower, velocity_estimator=None,
+                 kp_xy=0.3, kp_z=0.6, follow_distance=1.5, cmd_acc_max=1.0,
+                 yaw_priority_start_deg=25.0, yaw_priority_end_deg=45.0,
+                 max_velocity=2.5, *, yaw_rate_max):
         self.follower = follower
-        self.kp = kp
+        # priorità allo yaw: sopra start la correzione xy cala, a end è nulla
+        self.yaw_prio = np.radians([yaw_priority_start_deg, yaw_priority_end_deg])
+        self.follow_distance = follow_distance   # m, distanza orizzontale dal leader
+        self.cmd_acc_max = cmd_acc_max           # m/s², max variazione del comando di velocità
+        self.max_velocity = max_velocity         # m/s, limite del drone (come il leader)
         self.velocity_estimator = velocity_estimator or VelocityEstimator()
-        self.last_command_time = time.time()
-        self.command_period = 0.05  # 20 Hz limit
- 
-    def compute_command_with_angular_control(
-        self,
-        leader_pos,
-        follower_pos,
-        follower_yaw,
-        camera,
-        leader_vel=None,
-        kp_distance=0.1,
-        kp_angle=0.5
-    ):
-        """
-        Controllo ibrido: distanza + heading alignment
-        
-        Args:
-            leader_pos: posizione assoluta leader
-            follower_pos: posizione assoluta follower
-            follower_yaw: orientamento follower (rad) da mocap
-            camera: FOVPyramid instance
-            leader_vel: velocità stimata leader (optional)
-            kp_distance: guadagno controllo distanza (0.1-0.3)
-            kp_angle: guadagno controllo yaw (0.5-2.0)
-        
-        Returns:
-            velocity_cmd: [vx, vy, vz] m/s
-            yaw_cmd: velocità angolare wz (rad/s)
-        """
-        
-        # ===== CONTROLLO DISTANZA =====
-        relative_pos = leader_pos - follower_pos
-        
-        # Proporzionale sulla distanza
-        velocity_cmd = kp_distance * relative_pos
-        
-        # Feedforward velocità leader
-        if leader_vel is not None:
-            velocity_cmd += leader_vel
-        
-        # ===== CONTROLLO ANGOLARE =====
-        # Calcola errore di heading usando il metodo della camera
-        yaw_error = camera.get_yaw_error(relative_pos, follower_yaw)
-        
-        # Controllo proporzionale su yaw
-        yaw_cmd = kp_angle * yaw_error
-        
-        # Saturazione yaw (max rotazione 1.0 rad/s)
-        yaw_cmd = np.clip(yaw_cmd, -1.0, 1.0)
-        
-        return velocity_cmd, yaw_cmd
- 
-    def send_command(self, velocity_cmd: np.ndarray, yaw_cmd: float = 0.0, max_velocity: float = 1.0):
-        """
-        Invia il comando al drone follower via maneuver.velocity()
-        
-        Args:
-            velocity_cmd: [vx, vy, vz] velocità lineare (m/s)
-            yaw_cmd: velocità angolare wz (rad/s)
-            max_velocity: limite di velocità massima (m/s)
-        """
-        current_time = time.time()
-        
-        # Rate limiting
-        if current_time - self.last_command_time < self.command_period:
-            return
- 
-        self.last_command_time = current_time
- 
+        self.kp = np.array([kp_xy, kp_xy, kp_z])
+        self.yaw_rate_max = yaw_rate_max
+        self.t_prev = None
+        self.last_cmd = np.zeros(3)
+
+    def reset(self):                    # da chiamare in TrackingState.enter()
+        self.t_prev = None; self.last_cmd[:] = 0
+
+    def compute_command(self, leader_pos, follower_pos, follower_yaw,
+                        camera, leader_vel, kp_angle=1.0, follower_vel=None):
+        now = time.monotonic()
+        dt = 0.05 if self.t_prev is None else np.clip(now - self.t_prev, 1e-3, 0.2)
+        self.t_prev = now
+
+        leader_pos = np.asarray(leader_pos, dtype=float)
+        leader_vel = np.zeros(3) if leader_vel is None else np.asarray(leader_vel)
+
+        # punto desiderato: follow_distance dietro al leader lungo il bearing
+        # orizzontale follower→leader (stessa quota del leader)
+        rel = leader_pos - follower_pos
+        d_xy = np.linalg.norm(rel[:2])
+        if d_xy > 1e-3:
+            u = rel[:2] / d_xy
+        else:                                   # sovrapposti: indietreggia lungo lo yaw
+            u = np.array([np.cos(follower_yaw), np.sin(follower_yaw)])
+        target = leader_pos - self.follow_distance * np.array([u[0], u[1], 0.0])
+
+        # P + feedforward: v = v_leader + kp·(target − p)
+        v_corr = self.kp * (target - follower_pos)
+
+        # priorità allo yaw: se il leader si avvicina al bordo del FOV, prima si ruota
+        # per ricentrarlo e solo dopo si corregge la posizione nel piano
+        yaw_err = camera.get_yaw_error(rel, follower_yaw)
+        lo, hi = self.yaw_prio
+        prio = np.clip((hi - abs(yaw_err)) / (hi - lo), 0.0, 1.0)
+        v_corr[:2] *= prio
+
+        v_cmd = leader_vel + v_corr             # FF pieno (gain = 1)
+
+        # rate limiter: il comando non può cambiare più di cmd_acc_max*dt per tick
+        dv = v_cmd - self.last_cmd
+        dv_max = self.cmd_acc_max * dt
+        n_dv = np.linalg.norm(dv)
+        if n_dv > dv_max:
+            v_cmd = self.last_cmd + dv * (dv_max / n_dv)
+
+        # limite di velocità del drone (lo stesso del leader)
+        n = np.linalg.norm(v_cmd)
+        if n > self.max_velocity:
+            v_cmd = v_cmd * (self.max_velocity / n)
+
+        # yaw: leader centrato nel FOV = P sul bearing + feedforward della sua velocità angolare
+        # velocità relativa con la velocità MISURATA del follower: l'ultimo comando
+        # può differire molto dal moto reale e dare un FF nel verso sbagliato
+        v_f = self.last_cmd if follower_vel is None else np.asarray(follower_vel)
+        rel_v = leader_vel - v_f
+        r2 = max(rel[0]**2 + rel[1]**2, 0.25)
+        bearing_rate = (rel[0]*rel_v[1] - rel[1]*rel_v[0]) / r2
+        yaw_cmd = np.clip(kp_angle * yaw_err + bearing_rate,
+                          -self.yaw_rate_max, self.yaw_rate_max)
+
+        self.last_cmd = v_cmd.copy()
+        return v_cmd, yaw_cmd
+    
+    def send_command(self, velocity_cmd, yaw_cmd: float = 0.0, max_acc: float = 3.0):
+        """Invia il comando al follower (già saturato in compute_command)."""
+        velocity_cmd = np.asarray(velocity_cmd, dtype=float)
         try:
-            if not isinstance(velocity_cmd, np.ndarray):
-                velocity_cmd = np.array(velocity_cmd)
-            
-            # Saturazione velocità lineare
-            cmd_magnitude = np.linalg.norm(velocity_cmd)
-            if cmd_magnitude > max_velocity:
-                velocity_cmd = (velocity_cmd / cmd_magnitude) * max_velocity
-                logger.debug(f"Velocity saturated to {max_velocity:.2f} m/s")
-            
-            # Parametri POSIZIONALI: vx, vy, vz, ax, ay, az, duration, wz
             self.follower.velocity(
-                vx=float(velocity_cmd[0]),  # vx
-                vy=float(velocity_cmd[1]),  # vy
-                vz=float(velocity_cmd[2]),  # vz
-                wz=float(yaw_cmd),  # wz
-                ax=2.0, ay=2.0, az=2.0,          # ax, ay, az (accelerazione per planner)
-                duration=0.0,                     # duration (1 secondo)
+                vx=float(velocity_cmd[0]),
+                vy=float(velocity_cmd[1]),
+                vz=float(velocity_cmd[2]),
+                wz=float(yaw_cmd),
+                ax=max_acc, ay=max_acc, az=max_acc,
+                duration=0.0,
             )
-            logger.debug(
-                f"Command sent: v=[{velocity_cmd[0]:.2f}, {velocity_cmd[1]:.2f}, {velocity_cmd[2]:.2f}] m/s, "
-                f"wz={yaw_cmd:.2f} rad/s"
-            )
-        except Exception as e:
-            logger.error(f"Error sending command: {e}")
+        except GenoMError as e:
+            # es. ::genom::interrupted: un singolo comando perso non deve fermare il loop
+            logger.warning(f"follower.velocity fallito: {e}")

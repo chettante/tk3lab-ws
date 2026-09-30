@@ -3,6 +3,7 @@ import os
 import random
 import math
 import numpy as np 
+from final_project.config import CONFIG, genom_log_path
 
 
 # this connects to components running on the same host (localhost)
@@ -90,11 +91,7 @@ def setup_f(rotorcraft, pom, nhfc, maneuver,
 
   # PID tuning
   nhfc.set_saturation({'sat': {'x': 1, 'v': 1, 'ix': 0}})
-  nhfc.set_servo_gain({ 'gain': {
-    'Kpxy': 5, 'Kpz': 5, 'Kqxy': 4, 'Kqz': 0.1,
-    'Kvxy': 6, 'Kvz': 6, 'Kwxy': 1, 'Kwz': 0.1,
-    'Kixy': 0, 'Kiz': 0
-  }})
+  nhfc.set_servo_gain({'gain': dict(CONFIG['nhfc_gains'])})  # identici per i due droni
 
   # use tilt-prioritized controller
   nhfc.set_control_mode({'att_mode': '::nhfc::tilt_prioritized'})
@@ -201,11 +198,7 @@ def setup_l(rotorcraft, pom, nhfc, maneuver,
 
   # PID tuning
   nhfc.set_saturation({'sat': {'x': 1, 'v': 1, 'ix': 0}})
-  nhfc.set_servo_gain({ 'gain': {
-    'Kpxy': 5, 'Kpz': 5, 'Kqxy': 4, 'Kqz': 0.1,
-    'Kvxy': 6, 'Kvz': 6, 'Kwxy': 1, 'Kwz': 0.1,
-    'Kixy': 0, 'Kiz': 0
-  }})
+  nhfc.set_servo_gain({'gain': dict(CONFIG['nhfc_gains'])})  # identici per i due droni
 
   # use tilt-prioritized controller
   nhfc.set_control_mode({'att_mode': '::nhfc::tilt_prioritized'})
@@ -277,24 +270,24 @@ def setup():
 # Spin the motors and servo on current position for one drone. The 'tag'
 # keeps the per-drone log files separate.
 def start_one(rotorcraft, pom, nhfc, maneuver, tag):
-  pom.log_state('/tmp/pom_%s.log' % tag)
-  pom.log_measurements('/tmp/pom-measurements_%s.log' % tag)
+  pom.log_state(genom_log_path('pom_%s.log' % tag))
+  pom.log_measurements(genom_log_path('pom-measurements_%s.log' % tag))
 
-  rotorcraft.log('/tmp/rotorcraft_%s.log' % tag)
+  rotorcraft.log(genom_log_path('rotorcraft_%s.log' % tag))
   rotorcraft.start()
   rotorcraft.servo(ack=True) # this runs until stopped or input error
 
-  nhfc.log('/tmp/nhfc_%s.log' % tag)
+  nhfc.log(genom_log_path('nhfc_%s.log' % tag))
   #nhfc.set_current_position() # hover on current position
   nhfc.servo(ack=True)       # start nhfc's own control loop (reads state+reference, drives rotor_input)
 
-  maneuver.log('/tmp/maneuver_%s.log' % tag)
+  maneuver.log(genom_log_path('maneuver_%s.log' % tag))
   maneuver.set_current_state() # this runs until stopped or input error
 
 
 # Spin the motors and servo on current position. To be called interactively
 def start():
-  optitrack.set_logfile('/tmp/opti.log')
+  optitrack.set_logfile(genom_log_path('opti.log'))
 
   start_one(rotorcraft_l, pom_l, nhfc_l, maneuver_l, 'leader')
   start_one(rotorcraft_f, pom_f, nhfc_f, maneuver_f, 'follower')

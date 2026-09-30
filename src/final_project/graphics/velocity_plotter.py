@@ -6,13 +6,20 @@ ai due file, e produce un'unica immagine con 3 subplot (Vx, Vy, Vz).
 Uso:
     python3 compare_velocity.py [pom_log_path] [velocity_log_path] [output_path]
  
-Se non vengono passati argomenti, usa i default sotto (stessa cartella dello script).
+Se non vengono passati argomenti, usa i percorsi definiti in final_project/config.py
+(pom_leader_log, velocity_log, plot_velocity).
 """
  
 import os
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
+
+# permette l'esecuzione diretta (python3 velocity_plotter.py) leggendo final_project/config.py
+_SRC_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from final_project.config import config_path
  
  
 def load_pom_log(path):
@@ -103,11 +110,10 @@ def nearest_match(t_ref, t_pom, vx_pom, vy_pom, vz_pom):
  
  
 def main():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
  
-    pom_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(script_dir, "pom.log")
-    vel_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(script_dir, "velocity_log.txt")
-    out_path = sys.argv[3] if len(sys.argv) > 3 else os.path.join(script_dir, "velocity_comparison.png")
+    pom_path = sys.argv[1] if len(sys.argv) > 1 else config_path('pom_leader_log')
+    vel_path = sys.argv[2] if len(sys.argv) > 2 else config_path('velocity_log')
+    out_path = sys.argv[3] if len(sys.argv) > 3 else config_path('plot_velocity')
  
     # Carica i due file
     t_pom, vx_pom, vy_pom, vz_pom = load_pom_log(pom_path)

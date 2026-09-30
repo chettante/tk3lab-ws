@@ -41,7 +41,7 @@ class SearchingState:
         self.optitrack_helper = optitrack_helper
         self.leader_body_name, self.follower_body_name = follower_bodies
         self.search_timeout = search_timeout
-        
+
         self.enter_time = None
         self.loop_count = 0
 

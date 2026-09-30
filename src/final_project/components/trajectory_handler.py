@@ -45,6 +45,11 @@ class TrajectoryHandler:
         self._stop_sent = False
 
     @property
+    def cruise_speed(self):
+        """Velocità di crociera [m/s] lungo l'otto (vedi otto_time_law, ramp_fraction=0.15)."""
+        return self._PATH_LENGTH / (self.duration * (1.0 - 0.5 * 0.15))
+
+    @property
     def is_complete(self):
         """True quando tutti i campioni della traiettoria sono stati inviati."""
         return self._step > self.n_steps
@@ -196,6 +201,6 @@ class TrajectoryHandler:
         self._step += 1
         return True
 
-    def plot_trajectories(self):
-        plot_trajectory(self.trajectory_points, dt=self.period, filename="otto.png", show=True)
-        plot_trajectory(self.real_positions, dt=self.period, filename="real_pos.png", show=True)
+    def plot_trajectories(self, planned_path, real_path, show):
+        plot_trajectory(self.trajectory_points, dt=self.period, filename=planned_path, show=show)
+        plot_trajectory(self.real_positions, dt=self.period, filename=real_path, show=show)

@@ -12,13 +12,14 @@ class IdleState:
     def __init__(self,
                  camera, 
                  optitrack_helper, 
-                 follower_bodies
+                 follower_bodies,
+                 idle_timeout
     ):
         self.camera = camera
         self.optitrack_helper = optitrack_helper
         self.leader_body_name, self.follower_body_name = follower_bodies
         self.enter_time = None
-        self.idle_timeout = 60.0
+        self.idle_timeout = idle_timeout
         self.fov_check_count = 0
 
     def update(self):
