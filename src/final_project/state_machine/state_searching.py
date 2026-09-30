@@ -11,7 +11,6 @@ import logging
 import time
 import numpy as np
 from final_project.state_machine.state_machine import StateType
-from final_project.components.functions import _quat_to_yaw
 
 logger = logging.getLogger("SearchingState")
 
@@ -64,11 +63,8 @@ class SearchingState:
             logger.debug("Could not read positions")
             return None
 
-        # Calcola yaw del follower
-        follower_yaw = _quat_to_yaw(follower_quat)
-
-        # Trasforma in body frame
-        pos_in_body = self.camera.global_to_body(leader_pos, follower_pos, follower_yaw)
+        # Misura della camera (leader nel frame camera)
+        pos_in_body = self.camera.measure(leader_pos, follower_pos, follower_quat)
 
         # TODO: eseguire movimento di ricerca (loiter, spiral, etc.)
         # Per ora: print debug

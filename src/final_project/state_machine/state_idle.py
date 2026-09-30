@@ -2,7 +2,6 @@ import time
 import logging
 import numpy as np
 from final_project.state_machine.state_machine import StateType
-from final_project.components.functions import _quat_to_yaw
 
 
 logger = logging.getLogger("IdleState")
@@ -30,8 +29,7 @@ class IdleState:
         if leader_pos is None or follower_pos is None:
             return None
 
-        follower_yaw = _quat_to_yaw(follower_quat)
-        pos_in_body = self.camera.global_to_body(leader_pos, follower_pos, follower_yaw)
+        pos_in_body = self.camera.measure(leader_pos, follower_pos, follower_quat)
 
         if self.camera.contains(pos_in_body):
             logger.info("Leader detected in FOV! Transitioning to TRACKING")

@@ -9,68 +9,73 @@ from final_project.components.velocity_estimator import VelocityEstimator
 logger = logging.getLogger("FOVCamera")
 
 
+def quat_to_rot(q):
+    """Matrice di rotazione body→world da quaternione (qw, qx, qy, qz)."""
+    w, x, y, z = np.asarray(q, dtype=float) / np.linalg.norm(q)
+    return np.array([
+        [1 - 2*(y*y + z*z), 2*(x*y - w*z),     2*(x*z + w*y)],
+        [2*(x*y + w*z),     1 - 2*(x*x + z*z), 2*(y*z - w*x)],
+        [2*(x*z - w*y),     2*(y*z + w*x),     1 - 2*(x*x + y*y)],
+    ])
+
+
 class FOVPyramid:
-    """Geometria del FOV come piramide con apex nel body frame del follower"""
- 
-    def __init__(self, half_angle_deg: float = 45.0, max_range: float = 10.0):
+    """
+    FOV di una camera pinhole (come quella di Gazebo): tronco di piramide a base
+    rettangolare con apex nella camera. Asse ottico = x del drone ruotato di
+    yaw_offset attorno a z (montaggio della camera).
+      - semi-aperture orizzontale h e verticale v (asse ottico ↔ facce della piramide)
+      - range = profondità lungo l'asse ottico, tra i piani near e far (max_range)
+    gimbal=True: camera stabilizzata, la misura ruota solo con lo yaw del follower;
+    gimbal=False: camera rigida sul corpo (come in Gazebo), ruota con roll/pitch/yaw.
+    """
+
+    def __init__(self, half_angle_h_deg: float = 45.0, half_angle_v_deg: float = 36.87,
+                 max_range: float = 10.0, gimbal: bool = False, near: float = 0.1,
+                 yaw_offset_deg: float = 0.0):
         """
         Args:
-            half_angle_deg: semi-apertura angolare della piramide (gradi)
-            max_range: distanza massima di tracking (metri)
+            half_angle_h_deg: semi-apertura orizzontale (gradi, asse ottico ↔ faccia laterale)
+            half_angle_v_deg: semi-apertura verticale (gradi, asse ottico ↔ faccia sup./inf.)
+            max_range: piano far, profondità massima (metri)
+            gimbal: True = solo yaw, False = assetto completo
+            near: piano near (metri)
+            yaw_offset_deg: yaw di montaggio della camera rispetto all'asse x del drone
         """
-        self.half_angle = np.radians(half_angle_deg)
         self.max_range = max_range
-        self.half_angle_deg = half_angle_deg
- 
+        self.near = near
+        self.gimbal = gimbal
+        self.yaw_offset = np.radians(yaw_offset_deg)    # rad, heading camera = yaw drone + offset
+        self.tan_h = np.tan(np.radians(half_angle_h_deg))
+        self.tan_v = np.tan(np.radians(half_angle_v_deg))
+
     def contains(self, point_in_body_frame: np.ndarray) -> bool:
         """
-        Controlla se un punto è dentro la piramide FOV.
- 
+        True se il punto è nel FOV.
+
         Args:
-            point_in_body_frame: [x, y, z] nel frame del follower
-                                 (x pointing forward, y-z lateral)
- 
-        Returns:
-            True se il punto è nel FOV
+            point_in_body_frame: [x avanti, y sinistra, z su] nel frame della camera
         """
-        # Convert to numpy array if needed
-        if not isinstance(point_in_body_frame, np.ndarray):
-            point_in_body_frame = np.array(point_in_body_frame)
-        
-        # Range check
-        distance = np.linalg.norm(point_in_body_frame)
-        
-        if distance > self.max_range or distance < 0.1:
-            logger.debug(f"Point is out of range: {distance:.2f}m (max: {self.max_range}m)")
+        x, y, z = np.asarray(point_in_body_frame, dtype=float)
+        if not (self.near <= x <= self.max_range):
+            logger.debug(f"Point out of depth range: x={x:.2f}m (near {self.near}, far {self.max_range})")
             return False
- 
-        # Angle check: il punto deve essere davanti (x > 0)
-        if point_in_body_frame[0] <= 0:
-            logger.debug(f"Point is behind the camera: x={point_in_body_frame[0]:.2f}")
-            return False
- 
-        # Angolo dal centerline (asse x)
-        cos_angle = point_in_body_frame[0] / distance
-        
-        # Proteggi da errori numerici
-        cos_angle = np.clip(cos_angle, -1.0, 1.0)
-        angle_from_center = np.arccos(cos_angle)
-        
-        logger.debug(f"Angle from center: {np.degrees(angle_from_center):.1f}° (max: {self.half_angle_deg}°)")
- 
-        return angle_from_center <= self.half_angle
- 
-    def get_angle_from_center(self, point_in_body_frame: np.ndarray) -> float:
-        """Ritorna l'angolo dal centerline (radianti)"""
-        if not isinstance(point_in_body_frame, np.ndarray):
-            point_in_body_frame = np.array(point_in_body_frame)
-        
-        distance = np.linalg.norm(point_in_body_frame)
-        if distance < 0.1:
-            return 0.0
-        cos_angle = np.clip(point_in_body_frame[0] / distance, -1.0, 1.0)
-        return np.arccos(cos_angle)
-    
+        return abs(y) <= x * self.tan_h and abs(z) <= x * self.tan_v
+
+    def measure(self, leader_pos, follower_pos, follower_quat) -> np.ndarray:
+        """
+        "Misura della camera": posizione del leader nel frame della camera.
+        Con gimbal ruota solo con lo yaw del follower, senza con l'assetto completo.
+        """
+        rel = np.asarray(leader_pos, dtype=float) - np.asarray(follower_pos, dtype=float)
+        R = quat_to_rot(follower_quat)
+        if self.gimbal:
+            # solo yaw: yaw del drone + yaw di montaggio della camera
+            return self.global_to_body(rel, np.zeros(3), np.arctan2(R[1, 0], R[0, 0]) + self.yaw_offset)
+        body = R.T @ rel                                # leader negli assi del drone
+        # dagli assi del drone agli assi della camera (ruotata di yaw_offset attorno a z)
+        return self.global_to_body(body, np.zeros(3), self.yaw_offset)
+
     def get_yaw_error(self, pos_relative, follower_yaw=0.0):
         """
         Calcola errore di heading: quanto ruotare per centrare il leader

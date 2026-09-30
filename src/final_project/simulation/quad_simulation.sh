@@ -67,6 +67,9 @@ if [ ! -f $gz_world ]; then
     usage
 fi
 
+# allinea FOV e range della camera nel model.sdf a final_project/config.py
+python3 "$(dirname "$0")/sync_camera_fov.py"
+
 # start gazebo
 gz sim $gz_world & pids="$pids $!"
 

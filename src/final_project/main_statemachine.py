@@ -63,8 +63,11 @@ def main():
 
     # Camera FOV
     camera = FOVPyramid(
-        half_angle_deg=CONFIG['fov_half_angle_deg'],
-        max_range=CONFIG['fov_max_range']
+        half_angle_h_deg=CONFIG['fov_half_angle_h_deg'],
+        half_angle_v_deg=CONFIG['fov_half_angle_v_deg'],
+        max_range=CONFIG['fov_max_range'],
+        gimbal=CONFIG['camera_gimbal'],
+        yaw_offset_deg=CONFIG['camera_yaw_deg'],
     )
 
     # Velocity estimator
@@ -79,7 +82,7 @@ def main():
     follow_distance=CONFIG['tracking_follow_distance'],
     cmd_acc_max=CONFIG['tracking_cmd_acc_max'],
     yaw_priority_start_deg=CONFIG['tracking_yaw_priority_start_deg'],
-    yaw_priority_end_deg=CONFIG['fov_half_angle_deg'],   # fine priorità = bordo del FOV
+    yaw_priority_end_deg=CONFIG['fov_half_angle_h_deg'],   # fine priorità = bordo del FOV
     max_velocity=CONFIG['max_velocity'],                  # stessi limiti del leader
     yaw_rate_max=CONFIG['max_yaw_rate'],
     )

@@ -12,13 +12,13 @@ Produce un'unica figura:
   (3) vista dall'alto (x-y) di leader e follower
 
 Sfondo rosso nei grafici temporali = leader fuori dal FOV (calcolato
-con la stessa geometria di FOVPyramid.contains).
+con la stessa geometria di FOVPyramid.measure + contains: piramide pinhole).
 
 Uso:
     python3 tracking_plotter.py [--leader PATH] [--follower PATH] [--out PATH]
-                                [--fov-deg DEG] [--max-range M] [--rate 20]
+                                [--fov-deg H_DEG] [--fov-v-deg V_DEG] [--max-range M] [--rate 20]
                                 [--crop T_START T_END]     (secondi relativi)
-                                [--cols x y z yaw]  (indici colonna, default 7 8 9 12)
+                                [--cols x y z roll pitch yaw]  (indici colonna, default 7 8 9 10 11 12)
 """
 
 import argparse
@@ -36,8 +36,8 @@ if _SRC_ROOT not in sys.path:
 from final_project.config import CONFIG, config_path, genom_log_path
 
 # Formato pom-genom3: ts i posp attp velp avelp accp x y z roll pitch yaw vx ...
-DEFAULT_COLS = [7, 8, 9, 12]          # x y z yaw
-NAMES = ["x", "y", "z", "yaw"]
+DEFAULT_COLS = [7, 8, 9, 10, 11, 12]  # x y z roll pitch yaw
+NAMES = ["x", "y", "z", "roll", "pitch", "yaw"]
 
 
 def find_columns(header_tokens):
@@ -48,7 +48,7 @@ def find_columns(header_tokens):
 
 
 def load_pom_pose(path, cols=None):
-    """Ritorna t[N], pos[N,3], yaw[N] (rad, unwrapped) da un pom.log."""
+    """Ritorna t[N], pos[N,3], att[N,3] = roll, pitch, yaw (rad, unwrapped) da un pom.log."""
     header, rows = None, []
     with open(path, "r") as f:
         for line in f:
@@ -70,7 +70,7 @@ def load_pom_pose(path, cols=None):
     i_col = header.index("i") if header and "i" in header else None
 
     need = max(cols) + 1
-    t, pos, yaw = [], [], []
+    t, pos, att = [], [], []
     for parts in rows:
         if len(parts) < need:
             continue
@@ -79,28 +79,40 @@ def load_pom_pose(path, cols=None):
                 continue
             t.append(float(parts[0]))
             pos.append([float(parts[cols[i]]) for i in range(3)])
-            yaw.append(float(parts[cols[3]]))
+            att.append([float(parts[cols[i]]) for i in range(3, 6)])
         except ValueError:
             continue
     if not t:
         raise RuntimeError(f"Nessun dato valido in {path}")
-    return np.array(t), np.array(pos), np.unwrap(np.array(yaw))
+    return np.array(t), np.array(pos), np.unwrap(np.array(att), axis=0)
 
 
-def resample(t_src, pos, yaw, t_grid):
+def resample(t_src, pos, att, t_grid):
     p = np.column_stack([np.interp(t_grid, t_src, pos[:, i]) for i in range(3)])
-    y = np.interp(t_grid, t_src, yaw)
-    return p, y
+    a = np.column_stack([np.interp(t_grid, t_src, att[:, i]) for i in range(3)])
+    return p, a
 
 
-def in_fov_mask(rel, yaw, half_deg, max_range):
-    """Stessa logica di FOVPyramid.contains, vettorializzata."""
-    c, s = np.cos(yaw), np.sin(yaw)
-    xb = c * rel[:, 0] + s * rel[:, 1]
-    dist = np.linalg.norm(rel, axis=1)
-    ok = (dist <= max_range) & (dist >= 0.1) & (xb > 0)
-    ang = np.arccos(np.clip(xb / np.maximum(dist, 1e-9), -1, 1))
-    return ok & (ang <= np.radians(half_deg))
+def in_fov_mask(rel, att, half_h_deg, half_v_deg, max_range, gimbal, cam_yaw=0.0, near=0.1):
+    """Stessa logica di FOVPyramid.measure + contains, vettorializzata:
+    piramide rettangolare (pinhole), range = profondità lungo l'asse ottico."""
+    roll, pitch, yaw = att[:, 0], att[:, 1], att[:, 2]
+    if gimbal:                                   # camera stabilizzata: solo yaw
+        roll, pitch = np.zeros_like(yaw), np.zeros_like(yaw)
+    cr, sr, cp, sp, cy, sy = np.cos(roll), np.sin(roll), np.cos(pitch), np.sin(pitch), np.cos(yaw), np.sin(yaw)
+    # R body→world = Rz(yaw)·Ry(pitch)·Rx(roll), una per campione
+    R = np.stack([
+        np.stack([cy*cp, cy*sp*sr - sy*cr, cy*sp*cr + sy*sr], -1),
+        np.stack([sy*cp, sy*sp*sr + cy*cr, sy*sp*cr - cy*sr], -1),
+        np.stack([-sp,   cp*sr,            cp*cr], -1),
+    ], -2)
+    b = np.einsum('nji,nj->ni', R, rel)          # R^T · rel  (assi del drone)
+    c, s = np.cos(cam_yaw), np.sin(cam_yaw)      # assi della camera: ruotati di cam_yaw attorno a z
+    b = np.column_stack([c * b[:, 0] + s * b[:, 1], -s * b[:, 0] + c * b[:, 1], b[:, 2]])
+    tan_h, tan_v = np.tan(np.radians(half_h_deg)), np.tan(np.radians(half_v_deg))
+    x = b[:, 0]
+    return ((x >= near) & (x <= max_range)
+            & (np.abs(b[:, 1]) <= x * tan_h) & (np.abs(b[:, 2]) <= x * tan_v))
 
 
 def segments(mask, t):
@@ -120,16 +132,19 @@ def main():
     ap.add_argument("--leader", default=config_path("pom_leader_log"))
     ap.add_argument("--follower", default=config_path("pom_follower_log"))
     ap.add_argument("--out", default=config_path("plot_tracking"))
-    ap.add_argument("--fov-deg", type=float, default=CONFIG["fov_half_angle_deg"])
+    ap.add_argument("--fov-deg", type=float, default=CONFIG["fov_half_angle_h_deg"],
+                    help="semi-apertura orizzontale (gradi)")
+    ap.add_argument("--fov-v-deg", type=float, default=CONFIG["fov_half_angle_v_deg"],
+                    help="semi-apertura verticale (gradi)")
     ap.add_argument("--max-range", type=float, default=CONFIG["fov_max_range"])
     ap.add_argument("--rate", type=float, default=20.0, help="Hz della griglia comune")
     ap.add_argument("--crop", type=float, nargs=2, metavar=("T0", "T1"),
                     help="tieni solo [T0, T1] secondi dall'inizio dell'intervallo comune")
-    ap.add_argument("--cols", type=int, nargs=4, metavar=("X", "Y", "Z", "YAW"))
+    ap.add_argument("--cols", type=int, nargs=6, metavar=("X", "Y", "Z", "ROLL", "PITCH", "YAW"))
     args = ap.parse_args()
 
-    tl, pl, yl = load_pom_pose(args.leader, args.cols)
-    tf, pf, yf = load_pom_pose(args.follower, args.cols)
+    tl, pl, al = load_pom_pose(args.leader, args.cols)
+    tf, pf, af = load_pom_pose(args.follower, args.cols)
 
     t_start, t_end = max(tl.min(), tf.min()), min(tl.max(), tf.max())
     if t_end <= t_start:
@@ -140,15 +155,18 @@ def main():
         t_start, t_end = t_start + args.crop[0], min(t_end, t_start + args.crop[1])
 
     tg = np.arange(t_start, t_end, 1.0 / args.rate)
-    L, _ = resample(tl, pl, yl, tg)
-    F, yaw = resample(tf, pf, yf, tg)
+    L, _ = resample(tl, pl, al, tg)
+    F, att_f = resample(tf, pf, af, tg)
+    cam_yaw = np.radians(CONFIG["camera_yaw_deg"])
+    yaw = att_f[:, 2] + cam_yaw                  # heading della camera (asse ottico)
     t = tg - tg[0]
 
     rel = L - F
     dist = np.linalg.norm(rel, axis=1)
     bearing = np.arctan2(rel[:, 1], rel[:, 0])
     yaw_err = np.degrees(np.arctan2(np.sin(bearing - yaw), np.cos(bearing - yaw)))
-    fov = in_fov_mask(rel, yaw, args.fov_deg, args.max_range)
+    gimbal = CONFIG["camera_gimbal"]
+    fov = in_fov_mask(rel, att_f, args.fov_deg, args.fov_v_deg, args.max_range, gimbal, cam_yaw)
 
     fig = plt.figure(figsize=(15, 8))
     gs = fig.add_gridspec(2, 2, width_ratios=[2, 1])
@@ -176,7 +194,7 @@ def main():
     ax2.plot(t, yaw_err, color="tab:red", lw=1.4)
     ax2.axhline(0, color="gray", lw=0.6)
     ax2.axhline(args.fov_deg, color="k", ls=":", lw=1)
-    ax2.axhline(-args.fov_deg, color="k", ls=":", lw=1, label=f"±{args.fov_deg:g}° (semi-apertura FOV)")
+    ax2.axhline(-args.fov_deg, color="k", ls=":", lw=1, label=f"±{args.fov_deg:g}° (semi-apertura orizzontale FOV)")
     shade(ax2)
     ax2.set_ylabel("Errore di yaw [deg]")
     ax2.set_xlabel("Tempo [s] (relativo all'inizio dell'intervallo)")
@@ -192,7 +210,7 @@ def main():
     for P, c in ((L, "tab:blue"), (F, "tab:orange")):
         ax3.plot(*P[0, :2], "o", color=c, ms=8)
         ax3.plot(*P[-1, :2], "s", color=c, ms=8)
-    # heading del follower ogni ~1 s: freccia lungo lo yaw + bordi del FOV
+    # asse ottico della camera ogni ~1 s: freccia + bordi del FOV
     h_step = max(1, int(round(1.0 * args.rate)))
     idx = np.arange(0, len(t), h_step)
     span = np.ptp(np.vstack([L[:, :2], F[:, :2]]), axis=0).max()
@@ -205,14 +223,14 @@ def main():
     ax3.quiver(F[idx, 0], F[idx, 1], np.cos(yaw[idx]), np.sin(yaw[idx]),
                color="tab:red", angles="xy", scale_units="xy", scale=1.0 / arrow,
                width=0.004, zorder=3)
-    ax3.plot([], [], color="tab:red", lw=1.5, label=f"Heading follower (±{args.fov_deg:g}° FOV)")
+    ax3.plot([], [], color="tab:red", lw=1.5, label=f"Asse camera follower (±{args.fov_deg:g}° FOV)")
     ax3.set_aspect("equal", adjustable="datalim")
     ax3.set_xlabel("x [m]"); ax3.set_ylabel("y [m]")
     ax3.set_title("Vista dall'alto\n(○ start, □ fine, grigio ogni ~2 s, heading ogni ~1 s)", fontsize=10)
     ax3.grid(alpha=0.3)
     ax3.legend(loc="best", fontsize=8)
 
-    fig.legend(handles=[Patch(color="tab:red", alpha=0.3, label="Leader fuori FOV")],
+    fig.legend(handles=[Patch(color="tab:red", alpha=0.3, label="Leader fuori FOV (camera " + ("gimbal, solo yaw" if gimbal else "rigida, roll/pitch/yaw") + ")")],
                loc="lower center", fontsize=9)
     fig.tight_layout(rect=[0, 0.04, 1, 1])
     fig.savefig(args.out, dpi=150)

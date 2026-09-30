@@ -115,8 +115,10 @@ class TrackingState:
             self._stop()
             return None
 
-        follower_yaw = _quat_to_yaw(follower_quat)
-        pos_in_body = self.camera.global_to_body(leader_pos, follower_pos, follower_yaw)
+        # heading della camera = yaw del drone + yaw di montaggio: il controllo di yaw
+        # centra il leader sull'asse ottico, non sull'asse x del drone
+        camera_yaw = _quat_to_yaw(follower_quat) + self.camera.yaw_offset
+        pos_in_body = self.camera.measure(leader_pos, follower_pos, follower_quat)
         follower_vel = self._update_follower_vel(follower_pos, now)
 
         if self.camera.contains(pos_in_body):
@@ -158,7 +160,7 @@ class TrackingState:
         velocity_cmd, yaw_cmd = self.tracker.compute_command(
             leader_pos=leader_est,
             follower_pos=follower_pos,
-            follower_yaw=follower_yaw,
+            follower_yaw=camera_yaw,
             camera=self.camera,
             leader_vel=vel_est,
             kp_angle=self.kp_angle,

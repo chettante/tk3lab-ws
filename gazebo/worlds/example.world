@@ -67,7 +67,7 @@
     <include>
       <uri>file:///home/chetto/tk3lab-ws/gazebo/models/mrsim-quadrotor</uri>
       <name>qr4_following</name>
-      <pose>-3 0 0.025 0 0 0</pose>
+      <pose>-3 0 0.025 0 0 -0.785398</pose>
     </include>
 
     <plugin name="gz::sim::systems::Sensors" filename="gz-sim-sensors-system">

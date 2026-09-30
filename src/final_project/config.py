@@ -16,10 +16,16 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 CONFIG = {
     # ------------------------------------------------------------------
-    # FOV camera
+    # FOV camera (pinhole, come in Gazebo: sync_camera_fov.py copia questi valori nel model.sdf)
     # ------------------------------------------------------------------
-    'fov_half_angle_deg': 45.0,
-    'fov_max_range': 2.0,
+    # semi-aperture = angolo tra l'asse ottico e le facce laterali (h) / superiore-inferiore (v)
+    'fov_half_angle_h_deg': 43.5,   # orizzontale (sinistra/destra)
+    'fov_half_angle_v_deg': 29.0,  # verticale (su/giù)
+    'fov_max_range': 5.0,          # m, piano far (profondità lungo l'asse ottico)
+    'camera_yaw_deg': 45.0,         # montaggio camera: yaw rispetto all'asse x del drone
+                                    # (+45° = bisettrice tra braccio 1 anteriore/rosso e braccio 2)
+    'camera_gimbal': False,         # True = camera stabilizzata (solo yaw),
+                                    # False = camera rigida sul corpo (roll/pitch/yaw), come in Gazebo
 
     # ------------------------------------------------------------------
     # Tracking controller, leader centrato nel FOV
@@ -29,13 +35,13 @@ CONFIG = {
     # max_yaw_rate (sezione nhfc), uguali per i due droni.
     'tracking_kp_xy': 0.3,
     'tracking_kp_z': 0.6,
-    'tracking_follow_distance': 0.2,  # m, distanza orizzontale dal leader (lungo il bearing);
+    'tracking_follow_distance': 0.5,  # m, distanza orizzontale dal leader (lungo il bearing);
                                       # più grande = il bearing ruota più lentamente quando il leader curva
     'tracking_cmd_acc_max': 1.0,    # m/s², max variazione del comando di velocità (anti-scatto)
     'tracking_kp_angle': 1.5,       # 1/s: ritardo di yaw a regime ≈ velocità del bearing / kp_angle
     'tracking_max_acc': 3.0,        # m/s², passato a maneuver con il comando di velocità
     # priorità allo yaw: la correzione di posizione (xy) cala linearmente da 100% a
-    # |errore yaw| = yaw_priority_start fino a 0% al bordo del FOV (fov_half_angle_deg)
+    # |errore yaw| = yaw_priority_start fino a 0% al bordo del FOV (fov_half_angle_h_deg)
     'tracking_yaw_priority_start_deg': 25.0,
 
     # ------------------------------------------------------------------
