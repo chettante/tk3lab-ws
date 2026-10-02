@@ -6,7 +6,7 @@ import os
 g = genomix.connect()
 # to instead control components running on the remote computer "hostname" use
 # g = genomix.connect('hostname')
-
+##sium
 # adapt path to your setup
 g.rpath(os.environ['HOME'] + '/openrobots/lib/genom/pocolibs/plugins')
 
