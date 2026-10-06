@@ -29,6 +29,10 @@ atexit() {
     set +e
 
     kill $pids
+    # gz sim (wrapper ruby) e vglrun non inoltrano il segnale ai processi figli:
+    # senza questo il server Gazebo resta vivo e il run dopo non riesce ad aprire
+    # la porta di optitrack (1509)
+    pkill -f "gz sim" 2>/dev/null
     wait
     case $middleware in
         pocolibs) h2 end;;
@@ -71,7 +75,18 @@ fi
 python3 "$(dirname "$0")/sync_camera_fov.py"
 
 # start gazebo
-gz sim $gz_world & pids="$pids $!"
+if command -v vglrun >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+    # container avviato con la GPU (tk3lab-run-gpu): tutto il rendering sulla NVIDIA
+    #  - server: fisica + camera del follower renderizzata via EGL, senza display
+    #  - GUI: renderizzata da VirtualGL e copiata nel desktop VNC
+    echo "GPU NVIDIA disponibile: server headless + GUI con VirtualGL"
+    gz sim -s --headless-rendering $gz_world & pids="$pids $!"
+    vglrun -d egl gz sim -g & pids="$pids $!"
+else
+    # senza GPU: rendering software (llvmpipe), molto più lento
+    echo "GPU NVIDIA non disponibile: rendering su CPU"
+    gz sim $gz_world & pids="$pids $!"
+fi
 
 # wait for ctrl-C or any background process failure
 trap atexit CHLD

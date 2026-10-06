@@ -7,10 +7,10 @@ Transizioni:
 
 import logging
 import time
-from typing import Optional
 import numpy as np
 from final_project.state_machine.state_machine import StateType
 from final_project.components.functions import _quat_to_yaw
+from final_project.components.velocity_estimator import VelocityEstimator
 
 logger = logging.getLogger("TrackingState")
 
@@ -47,16 +47,15 @@ class TrackingState:
         self.out_of_fov_timeout = out_of_fov_timeout
         self.tracking_timeout = tracking_timeout
 
-        # impostato dalla StateMachine a ogni transizione
+        # impostato da enter(), chiamato dalla StateMachine a ogni transizione
         self.enter_time = None
-        self._entered_at = None     # ultimo enter_time già gestito
 
         self.last_fov_time = None
         self.wasnt_in_fov = True
         self.last_leader_pos = None
         self.last_leader_vel = np.zeros(3)
-        self._f_prev = None             # (posizione, tempo) precedenti del follower
-        self.follower_vel = np.zeros(3)
+        # velocità misurata del follower (OptiTrack) per il FF dello yaw
+        self.follower_vel_estimator = VelocityEstimator(log=False)
 
         self.loop_count = 0
         self.in_fov_count = 0
@@ -68,34 +67,17 @@ class TrackingState:
             max_acc=self.max_acc,
         )
 
-    def _reset_if_new_entry(self, now):
-        # La StateMachine imposta enter_time a ogni transizione:
-        # se è cambiato, siamo appena entrati in TRACKING.
-        if self._entered_at != self.enter_time:
-            self._entered_at = self.enter_time
-            self.last_fov_time = now
-            self.wasnt_in_fov = True
-            self.last_leader_pos = None
-            self.last_leader_vel = np.zeros(3)
-            self._f_prev = None
-            self.follower_vel = np.zeros(3)
-            self.tracker.reset()
+    def enter(self):
+        """Chiamato dalla StateMachine a ogni ingresso in TRACKING: azzera lo stato del ciclo precedente."""
+        self.enter_time = time.time()
+        self.last_fov_time = self.enter_time
+        self.wasnt_in_fov = True
+        self.last_leader_pos = None
+        self.last_leader_vel = np.zeros(3)
+        self.follower_vel_estimator.reset()
+        self.tracker.reset()
 
-    def _update_follower_vel(self, follower_pos, now, alpha=0.5):
-        """Velocità misurata del follower (differenza finita + EMA) per il FF dello yaw."""
-        p = np.asarray(follower_pos, dtype=float)
-        if self._f_prev is not None:
-            p_prev, t_prev = self._f_prev
-            if np.array_equal(p, p_prev):       # campione OptiTrack non aggiornato
-                return self.follower_vel
-            dt = now - t_prev
-            if dt > 1e-3:
-                v = (p - p_prev) / min(dt, 0.2)
-                self.follower_vel = alpha * v + (1 - alpha) * self.follower_vel
-        self._f_prev = (p, now)
-        return self.follower_vel
-
-    def update(self) -> Optional[StateType]:
+    def update(self):
         """
         1. Legge le pose da OptiTrack
         2. Se il leader è nel FOV: aggiorna la stima di velocità e inseguilo
@@ -105,7 +87,6 @@ class TrackingState:
         """
         self.loop_count += 1
         now = time.time()
-        self._reset_if_new_entry(now)
 
         leader_pos, _ = self.optitrack_helper(self.leader_body_name)
         follower_pos, follower_quat = self.optitrack_helper(self.follower_body_name)
@@ -119,21 +100,20 @@ class TrackingState:
         # centra il leader sull'asse ottico, non sull'asse x del drone
         camera_yaw = _quat_to_yaw(follower_quat) + self.camera.yaw_offset
         pos_in_body = self.camera.measure(leader_pos, follower_pos, follower_quat)
-        follower_vel = self._update_follower_vel(follower_pos, now)
+        follower_vel = self.follower_vel_estimator.update_world(follower_pos)
 
         if self.camera.contains(pos_in_body):
             self.in_fov_count += 1
             self.last_fov_time = now
 
-            leader_vel, self.wasnt_in_fov = self.tracker.velocity_estimator.update(
-                leader_pos, self.wasnt_in_fov
+            # posizione e velocità del leader dalla misura della camera
+            leader_vel, leader_cam_pos = self.tracker.velocity_estimator.update(
+                pos_in_body, follower_pos, follower_quat, self.camera, self.wasnt_in_fov
             )
-            if leader_vel is None:
-                leader_vel = np.zeros(3)
             self.wasnt_in_fov = False
 
-            self.last_leader_pos = np.asarray(leader_pos, dtype=float)
-            self.last_leader_vel = np.asarray(leader_vel, dtype=float)
+            self.last_leader_pos = leader_cam_pos
+            self.last_leader_vel = leader_vel
             leader_est = self.last_leader_pos
             vel_est = self.last_leader_vel
 

@@ -3,7 +3,10 @@ import os
 import random
 import math
 import numpy as np 
-from final_project.config import CONFIG, genom_log_path
+from final_project.config import genom_log_path
+
+NHFC_GAINS = {'Kpxy': 5, 'Kpz': 5, 'Kqxy': 4, 'Kqz': 0.1,
+              'Kvxy': 6, 'Kvz': 6, 'Kwxy': 1, 'Kwz': 0.1, 'Kixy': 0, 'Kiz': 0}
 
 
 # this connects to components running on the same host (localhost)
@@ -91,7 +94,7 @@ def setup_f(rotorcraft, pom, nhfc, maneuver,
 
   # PID tuning
   nhfc.set_saturation({'sat': {'x': 1, 'v': 1, 'ix': 0}})
-  nhfc.set_servo_gain({'gain': dict(CONFIG['nhfc_gains'])})  # identici per i due droni
+  nhfc.set_servo_gain({'gain': dict(NHFC_GAINS)})  # copia: genomix svuota il dict che riceve
 
   # use tilt-prioritized controller
   nhfc.set_control_mode({'att_mode': '::nhfc::tilt_prioritized'})
@@ -198,7 +201,7 @@ def setup_l(rotorcraft, pom, nhfc, maneuver,
 
   # PID tuning
   nhfc.set_saturation({'sat': {'x': 1, 'v': 1, 'ix': 0}})
-  nhfc.set_servo_gain({'gain': dict(CONFIG['nhfc_gains'])})  # identici per i due droni
+  nhfc.set_servo_gain({'gain': dict(NHFC_GAINS)})  # copia: genomix svuota il dict che riceve
 
   # use tilt-prioritized controller
   nhfc.set_control_mode({'att_mode': '::nhfc::tilt_prioritized'})

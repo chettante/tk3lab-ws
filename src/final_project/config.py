@@ -35,7 +35,7 @@ CONFIG = {
     # max_yaw_rate (sezione nhfc), uguali per i due droni.
     'tracking_kp_xy': 0.3,
     'tracking_kp_z': 0.6,
-    'tracking_follow_distance': 0.5,  # m, distanza orizzontale dal leader (lungo il bearing);
+    'tracking_follow_distance': 0.0,  # m, distanza orizzontale dal leader (lungo il bearing);
                                       # più grande = il bearing ruota più lentamente quando il leader curva
     'tracking_cmd_acc_max': 1.0,    # m/s², max variazione del comando di velocità (anti-scatto)
     'tracking_kp_angle': 1.5,       # 1/s: ritardo di yaw a regime ≈ velocità del bearing / kp_angle
@@ -49,8 +49,7 @@ CONFIG = {
     # ------------------------------------------------------------------
     'idle_timeout': 10.0,
     'tracking_timeout': 120.0,
-    'search_timeout': 30.0,
-    'out_of_fov_timeout': 0.6,      # grace period con predizione
+    'out_of_fov_timeout': 0.1,      # grace period con predizione
 
     # ------------------------------------------------------------------
     # Loop di controllo e logging a terminale
@@ -71,7 +70,7 @@ CONFIG = {
         'Kixy': 0, 'Kiz': 0,
     },
     # limiti dei droni: impostati su maneuver per entrambi e usati per saturare il comando del follower
-    'max_velocity': 2.5,            # m/s
+    'max_velocity': 10.0,            # m/s
     'max_yaw_rate': 2.0,            # rad/s
 
     # ------------------------------------------------------------------
@@ -85,17 +84,42 @@ CONFIG = {
     # ------------------------------------------------------------------
     'leader_start_pos': (-1.0, 0.0, 1.0),   # goto iniziale (x, y, z) [m]
     'leader_start_yaw': 0.0,                # rad
+    'leader_start_velocity': (0.0, 0.0, 0.0),  # m/s just to istantiate the searching class
     'leader_start_duration': 0.0,           # s (0 = il più veloce possibile)
 
     'leader_random_trajectory': False,       # TEMP: waypoint casuali (random_trajectory) invece dell'otto
     'random_traj_points': 3,                # numero di waypoint casuali (15 s ciascuno + 10 s finale)
 
-    'traj_duration': 20.0,                  # s, tempo in cui il leader completa l'otto
-    'traj_tail_time': 5.0,                 # s, il main continua ancora per questo tempo dopo la fine dell'otto
+    'traj_duration': 40.0,                  # s, tempo in cui il leader completa l'otto
+    'traj_tail_time': 15.0,                 # s, il main continua ancora per questo tempo dopo la fine dell'otto
     'traj_A': 5.0,                          # ampiezza lungo y [m]
     'traj_B': 5.0,                          # ampiezza lungo x (semi-asse = B/2) [m]
     'traj_H': 5.0,                          # quota massima sopra P0 [m]
     'traj_P0': (-1.0, 0.0, 1.0),            # punto di partenza/arrivo (di norma = leader_start_pos)
+
+    # ------------------------------------------------------------------
+    # Follower: Research strategy parameters
+    # ------------------------------------------------------------------
+    'traj_duration_research' : 70.0,
+    'follower_start_pos': (0.0, 0.0, 0.0),
+    'follower_start_yaw': 0.0,
+
+    # recupero: un tratto verso la posizione PREVISTA del leader
+    # p_pred = p_last + v_last·(t_lost + T): ruota per centrarlo, si avvicina
+    # se è oltre approach_dist, va alla sua quota prevista
+    'search_T_rec': 0.5,            # s, durata minima del recupero e orizzonte di previsione
+    'search_approach_dist': 3.0,    # m, distanza orizzontale dal leader previsto (< fov_max_range)
+    'search_z_min': 0.5,            # m, limiti di quota nel recupero
+    'search_z_max': 12.0,
+    # scansione globale: home, salita di delta_z_global ruotando, discesa ruotando
+    'search_home': (0.0, 0.0, 1.0),
+    'search_delta_z_global': 10.0,  # m
+    'search_v_scan': 1.0,           # m/s, velocità di picco in salita/discesa
+    'search_omega_scan': 0.5,       # rad/s, rotazione durante la scansione
+    'search_t_hold': 1.0,           # s, durata delle attese da fermo
+    'search_a_max': 1.5,            # m/s², accelerazione di picco dei tratti di ricerca
+    'search_yaw_acc_max': 2.0,      # rad/s², accelerazione angolare di picco nel recupero
+
 
     # ------------------------------------------------------------------
     # Percorsi: log e immagini

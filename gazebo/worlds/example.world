@@ -59,7 +59,7 @@
     -->
 
     <include>
-      <uri>file:///home/chetto/tk3lab-ws/gazebo/models/mrsim-quadrotor</uri>
+      <uri>file:///home/chetto/tk3lab-ws/gazebo/models/mrsim-quadrotor-leader</uri>
       <name>qr4_leading</name>
       <pose>-1 0 0.025 0 0 0</pose>
     </include>

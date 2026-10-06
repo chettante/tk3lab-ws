@@ -20,10 +20,10 @@ class StateMachine:
         next_state = self.current_state.update()
 
         if next_state == StateType.TRACKING:
-            self.tracking_state.enter_time = time.time()
+            self.tracking_state.enter()
             self.current_state = self.tracking_state
         elif next_state == StateType.SEARCHING:
-            self.searching_state.enter_time = time.time()
+            self.searching_state.enter()
             self.current_state = self.searching_state
         elif next_state == StateType.IDLE:
             self.idle_state.enter_time = time.time()

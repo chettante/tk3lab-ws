@@ -12,8 +12,9 @@ Nel world aggiorna anche lo yaw di spawn del follower, così che all'avvio l'ass
 ottico punti dritto sul leader: yaw = bearing(follower → leader) − camera_yaw_deg.
 
 Gazebo legge l'SDF solo all'avvio: quad_simulation.sh lo chiama prima di 'gz sim'.
-Il modello mrsim-quadrotor è condiviso da leader e follower, quindi la camera
-cambia per entrambi (è usata solo quella del follower).
+La camera c'è solo nel modello del follower (mrsim-quadrotor): il leader usa
+mrsim-quadrotor-leader, identico ma senza camera, per non renderizzarla.
+Le modifiche alla fisica del drone vanno fatte in entrambi i model.sdf.
 camera_gimbal non ha effetto sull'SDF: in Gazebo la camera resta rigida sul corpo.
 
 Uso:

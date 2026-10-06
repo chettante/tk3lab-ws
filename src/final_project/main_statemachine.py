@@ -34,6 +34,7 @@ from final_project.state_machine.state_tracking import TrackingState
 from final_project.state_machine.state_searching import SearchingState
 from final_project.components.trajectory_handler import *
 from final_project.config import CONFIG, config_path
+from final_project.components.Research import *
 
 # Setup logging
 logging.basicConfig(
@@ -87,6 +88,19 @@ def main():
     yaw_rate_max=CONFIG['max_yaw_rate'],
     )
 
+    #Research Strategy
+      
+    search = LeaderSearchManeuver(
+           p_follower0 = CONFIG['follower_start_pos'], yaw0=CONFIG['follower_start_yaw'], p_leader_last=CONFIG['leader_start_pos'], v_leader_last=CONFIG['leader_start_velocity'], dt=CONFIG['control_loop_period'],
+           v_max=CONFIG['max_velocity'], v_scan=CONFIG['search_v_scan'],
+           delta_z_global=CONFIG['search_delta_z_global'], omega_scan=CONFIG['search_omega_scan'],
+           yaw_rate_max=CONFIG['max_yaw_rate'], t_hold=CONFIG['search_t_hold'],
+           a_max=CONFIG['search_a_max'], yaw_acc_max=CONFIG['search_yaw_acc_max'],
+           T_rec=CONFIG['search_T_rec'], approach_dist=CONFIG['search_approach_dist'],
+           z_min=CONFIG['search_z_min'], z_max=CONFIG['search_z_max'], p_home=CONFIG['search_home'],
+       )
+    
+
     # OptiTrack reader
     optitrack_reader = create_optitrack_reader(optitrack)
 
@@ -115,9 +129,12 @@ def main():
 
     searching_state = SearchingState(
         camera=camera,
+        search=search,
+        vel_estimator = vel_estimator,
+        tracking_state=tracking_state,
         optitrack_helper=optitrack_reader,
         follower_bodies=follower_bodies,
-        search_timeout=CONFIG['search_timeout'],
+        maneuver_follower=maneuver_f,
     )
 
     # State Machine
@@ -136,6 +153,8 @@ def main():
                 f"max yaw rate: {CONFIG['max_yaw_rate']} rad/s")
 
     PERIOD = CONFIG['control_loop_period']
+
+    
 
     # select the trajectory for the leader
     th = TrajectoryHandler(
@@ -177,6 +196,7 @@ def main():
     loop_count = 0
     x0, y0, z0 = CONFIG['leader_start_pos']
     maneuver_l.goto(x0, y0, z0, CONFIG['leader_start_yaw'], CONFIG['leader_start_duration'])
+    
     if random_traj:
         # accoda i waypoint in maneuver_l: vengono eseguiti da maneuver, senza comandi dal loop
         random_trajectory(CONFIG['random_traj_points'])
@@ -184,10 +204,12 @@ def main():
 
     try:
         while loop_count < max_loops:
+            #nhfc_f.servo(ack=True)
+            #nhfc_l.servo(ack=True)
             # Aggiorna la traiettoria del leader (solo per l'otto)
             if not random_traj:
                 th.update_trajectory(maneuver_l)
-
+                
             # Esegui ciclo di update della state machine
             current_state = sm.get_current_state()
             sm.update()
@@ -210,11 +232,11 @@ def main():
         logger.info(f"[*] Loop terminato dopo {loop_count} cicli, stop dei droni")
         stop()
     if not random_traj:     # con i waypoint casuali non c'è una traiettoria pianificata da plottare
-        th.plot_trajectories(
+        #th.plot_trajectories(
             planned_path=config_path('plot_planned_trajectory'),
             real_path=config_path('plot_real_trajectory'),
             show=CONFIG['show_plots'],
-        )
+        #)
     logger.info("[+] Drone chase control finished")
     
 

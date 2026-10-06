@@ -9,10 +9,12 @@ Legge (percorsi e parametri FOV di default da final_project/config.py):
 Produce un'unica figura:
   (1) distanza leader-follower su x, y, z (frame globale) + norma
   (2) errore di yaw (bearing del leader - yaw del follower)
-  (3) vista dall'alto (x-y) di leader e follower
+  (3) angolo verticale del leader nel frame camera (elevazione sull'asse ottico)
+  (4) vista dall'alto (x-y) di leader e follower
 
-Sfondo rosso nei grafici temporali = leader fuori dal FOV (calcolato
-con la stessa geometria di FOVPyramid.measure + contains: piramide pinhole).
+Leader fuori dal FOV (calcolato con la stessa geometria di FOVPyramid.measure +
+contains: piramide pinhole) = sfondo rosso nei grafici temporali, tratti rossi
+evidenziati sulle traiettorie nella vista dall'alto.
 
 Uso:
     python3 tracking_plotter.py [--leader PATH] [--follower PATH] [--out PATH]
@@ -93,9 +95,9 @@ def resample(t_src, pos, att, t_grid):
     return p, a
 
 
-def in_fov_mask(rel, att, half_h_deg, half_v_deg, max_range, gimbal, cam_yaw=0.0, near=0.1):
-    """Stessa logica di FOVPyramid.measure + contains, vettorializzata:
-    piramide rettangolare (pinhole), range = profondità lungo l'asse ottico."""
+def camera_coords(rel, att, gimbal, cam_yaw=0.0):
+    """Stessa logica di FOVPyramid.measure, vettorializzata: posizione del leader
+    nel frame camera [x avanti (asse ottico), y sinistra, z su]."""
     roll, pitch, yaw = att[:, 0], att[:, 1], att[:, 2]
     if gimbal:                                   # camera stabilizzata: solo yaw
         roll, pitch = np.zeros_like(yaw), np.zeros_like(yaw)
@@ -108,7 +110,12 @@ def in_fov_mask(rel, att, half_h_deg, half_v_deg, max_range, gimbal, cam_yaw=0.0
     ], -2)
     b = np.einsum('nji,nj->ni', R, rel)          # R^T · rel  (assi del drone)
     c, s = np.cos(cam_yaw), np.sin(cam_yaw)      # assi della camera: ruotati di cam_yaw attorno a z
-    b = np.column_stack([c * b[:, 0] + s * b[:, 1], -s * b[:, 0] + c * b[:, 1], b[:, 2]])
+    return np.column_stack([c * b[:, 0] + s * b[:, 1], -s * b[:, 0] + c * b[:, 1], b[:, 2]])
+
+
+def in_fov_mask(b, half_h_deg, half_v_deg, max_range, near=0.1):
+    """Stessa logica di FOVPyramid.contains: piramide rettangolare (pinhole),
+    range = profondità lungo l'asse ottico. b = camera_coords(...)."""
     tan_h, tan_v = np.tan(np.radians(half_h_deg)), np.tan(np.radians(half_v_deg))
     x = b[:, 0]
     return ((x >= near) & (x <= max_range)
@@ -166,12 +173,16 @@ def main():
     bearing = np.arctan2(rel[:, 1], rel[:, 0])
     yaw_err = np.degrees(np.arctan2(np.sin(bearing - yaw), np.cos(bearing - yaw)))
     gimbal = CONFIG["camera_gimbal"]
-    fov = in_fov_mask(rel, att_f, args.fov_deg, args.fov_v_deg, args.max_range, gimbal, cam_yaw)
+    cam = camera_coords(rel, att_f, gimbal, cam_yaw)
+    fov = in_fov_mask(cam, args.fov_deg, args.fov_v_deg, args.max_range)
+    # angolo verticale del leader rispetto all'asse ottico: |z| <= x·tan_v  <=>  |elev| <= semi-apertura v
+    elev = np.degrees(np.arctan2(cam[:, 2], cam[:, 0]))
 
-    fig = plt.figure(figsize=(15, 8))
-    gs = fig.add_gridspec(2, 2, width_ratios=[2, 1])
+    fig = plt.figure(figsize=(16, 10))
+    gs = fig.add_gridspec(3, 2, width_ratios=[2, 1])
     ax1 = fig.add_subplot(gs[0, 0])
     ax2 = fig.add_subplot(gs[1, 0], sharex=ax1)
+    ax4 = fig.add_subplot(gs[2, 0], sharex=ax1)
     ax3 = fig.add_subplot(gs[:, 1])
 
     def shade(ax):
@@ -197,13 +208,36 @@ def main():
     ax2.axhline(-args.fov_deg, color="k", ls=":", lw=1, label=f"±{args.fov_deg:g}° (semi-apertura orizzontale FOV)")
     shade(ax2)
     ax2.set_ylabel("Errore di yaw [deg]")
-    ax2.set_xlabel("Tempo [s] (relativo all'inizio dell'intervallo)")
     ax2.set_title("Errore di yaw (>0: leader a sinistra, il follower deve ruotare CCW)")
     ax2.grid(alpha=0.3)
     ax2.legend(loc="upper right", fontsize=8)
 
-    ax3.plot(L[:, 0], L[:, 1], color="tab:blue", lw=1.6, label="Leader")
-    ax3.plot(F[:, 0], F[:, 1], color="tab:orange", lw=1.6, label="Follower")
+    ax4.plot(t, elev, color="tab:purple", lw=1.4)
+    ax4.axhline(0, color="gray", lw=0.6)
+    ax4.axhline(args.fov_v_deg, color="k", ls=":", lw=1)
+    ax4.axhline(-args.fov_v_deg, color="k", ls=":", lw=1,
+                label=f"±{args.fov_v_deg:g}° (semi-apertura verticale FOV)")
+    shade(ax4)
+    ax4.set_ylabel("Angolo verticale [deg]")
+    ax4.set_xlabel("Tempo [s] (relativo all'inizio dell'intervallo)")
+    ax4.set_title("Angolo verticale del leader sull'asse ottico (>0: leader sopra)")
+    ax4.grid(alpha=0.3)
+    ax4.legend(loc="upper right", fontsize=8)
+
+    # tratti con il leader fuori FOV: fascia rossa sotto entrambe le traiettorie
+    # (NaN dove il leader è nel FOV, così la linea si interrompe)
+    out = ~fov
+    out_line = out | np.r_[out[1:], False] | np.r_[False, out[:-1]]   # estende di un campione: niente buchi ai bordi
+    for P in (L, F):
+        ax3.plot(np.where(out_line, P[:, 0], np.nan), np.where(out_line, P[:, 1], np.nan),
+                 color="tab:red", lw=7, alpha=0.3, solid_capstyle="round", zorder=1)
+    ax3.plot(L[:, 0], L[:, 1], color="tab:blue", lw=1.6, label="Leader", zorder=2)
+    ax3.plot(F[:, 0], F[:, 1], color="tab:orange", lw=1.6, label="Follower", zorder=2)
+    # inizio di ogni perdita del leader: croce rossa sulla posizione del leader
+    lost = np.flatnonzero(out & ~np.r_[False, out[:-1]])
+    ax3.plot(L[lost, 0], L[lost, 1], "x", color="tab:red", ms=9, mew=2, zorder=4,
+             label="Leader perso (inizio)")
+    ax3.plot([], [], color="tab:red", lw=7, alpha=0.3, label="Leader fuori FOV")
     step = max(1, int(round(2.0 * args.rate)))          # collegamento ogni ~2 s
     for i in range(0, len(t), step):
         ax3.plot([L[i, 0], F[i, 0]], [L[i, 1], F[i, 1]], color="gray", lw=0.6, alpha=0.6)

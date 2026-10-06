@@ -76,6 +76,16 @@ class FOVPyramid:
         # dagli assi del drone agli assi della camera (ruotata di yaw_offset attorno a z)
         return self.global_to_body(body, np.zeros(3), self.yaw_offset)
 
+    def to_world(self, point_in_cam, follower_pos, follower_quat) -> np.ndarray:
+        """Inversa di measure(): posizione del leader in world dalla misura della camera."""
+        R = quat_to_rot(follower_quat)
+        if self.gimbal:
+            yaw = np.arctan2(R[1, 0], R[0, 0]) + self.yaw_offset
+            rel = self.global_to_body(point_in_cam, np.zeros(3), -yaw)
+        else:
+            rel = R @ self.global_to_body(point_in_cam, np.zeros(3), -self.yaw_offset)
+        return np.asarray(follower_pos, dtype=float) + rel
+
     def get_yaw_error(self, pos_relative, follower_yaw=0.0):
         """
         Calcola errore di heading: quanto ruotare per centrare il leader
