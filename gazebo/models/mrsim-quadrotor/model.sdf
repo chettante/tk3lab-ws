@@ -87,7 +87,7 @@
         </material>
       </visual>
 
-      <!-- TELECAMERA (FOV TOTALE 87°x58°, RANGE 5M) -->
+      <!-- TELECAMERA (FOV TOTALE 87°x58°, RANGE 10M) -->
       <sensor type="camera" name="camera">
         <!-- Pose: X Y Z Roll Pitch Yaw -> asse ottico ruotato di 45° attorno a z rispetto all'asse x del drone, da config.py -->
         <pose>0 0 -0.10 0 0 0.785398</pose>
@@ -100,7 +100,7 @@
           </image>
           <clip>
             <near>0.1</near>
-            <far>5</far> <!-- Max range di 5 metri, da config.py -->
+            <far>10</far> <!-- Max range di 10 metri, da config.py -->
           </clip>
         </camera>
         <always_on>1</always_on>

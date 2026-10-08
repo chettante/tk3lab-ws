@@ -8,6 +8,7 @@ class StateType(Enum):
     IDLE = "IDLE"
     TRACKING = "TRACKING"
     SEARCHING = "SEARCHING"
+    EXPLORING = "EXPLORING"
 
 class StateMachine:
     def __init__(self, initial_state):
@@ -15,6 +16,7 @@ class StateMachine:
         self.idle_state = None
         self.tracking_state = None
         self.searching_state = None
+        self.exploring_state = None
 
     def update(self):
         next_state = self.current_state.update()
@@ -25,6 +27,9 @@ class StateMachine:
         elif next_state == StateType.SEARCHING:
             self.searching_state.enter()
             self.current_state = self.searching_state
+        elif next_state == StateType.EXPLORING:
+            self.exploring_state.enter()
+            self.current_state = self.exploring_state
         elif next_state == StateType.IDLE:
             self.idle_state.enter_time = time.time()
             self.current_state = self.idle_state
@@ -36,4 +41,6 @@ class StateMachine:
             return StateType.TRACKING
         elif self.current_state is self.searching_state:
             return StateType.SEARCHING
+        elif self.current_state is self.exploring_state:
+            return StateType.EXPLORING
         return None

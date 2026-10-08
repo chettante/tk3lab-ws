@@ -4,6 +4,10 @@
 # select the used middleware and the gazebo world file to use
 middleware=pocolibs
 gz_world=~/tk3lab-ws/gazebo/worlds/example.world
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+WORKSPACE_ROOT=$(CDPATH= cd -- "${SCRIPT_DIR}/../../.." && pwd)
+GZ_SIM_RESOURCE_PATH="${WORKSPACE_ROOT}/gazebo/models${GZ_SIM_RESOURCE_PATH:+:${GZ_SIM_RESOURCE_PATH}}"
+export GZ_SIM_RESOURCE_PATH
 
 # Genom3 components that exist once, shared by all drones
 shared_components="
@@ -25,7 +29,7 @@ pids=
 
 # cleanup, called after ctrl-C
 atexit() {
-    trap - 0 INT CHLD
+    trap - 0 INT TERM CHLD
     set +e
 
     kill $pids
@@ -39,7 +43,7 @@ atexit() {
     esac
     exit 0
 }
-trap atexit 0 INT
+trap atexit 0 INT TERM
 set -e
 
 # middleware init, pocolibs or ros
@@ -72,10 +76,62 @@ if [ ! -f $gz_world ]; then
 fi
 
 # allinea FOV e range della camera nel model.sdf a final_project/config.py
-python3 "$(dirname "$0")/sync_camera_fov.py"
+python3 "${SCRIPT_DIR}/sync_camera_fov.py"
 
 # start gazebo
-if command -v vglrun >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+gazebo_partition=${GZ_PARTITION:-tk3lab}
+gazebo_ip=${GZ_IP:-$(hostname -I | awk '{print $1}')}
+gazebo_transport_args="GZ_PARTITION=$gazebo_partition GZ_IP=$gazebo_ip USER=$(id -un) LOGNAME=$(id -un)"
+
+intel_gpu=0
+for gpu_device in /sys/class/drm/card[0-9]*/device; do
+    if [ -r "$gpu_device/vendor" ] && [ "$(cat "$gpu_device/vendor")" = "0x8086" ]; then
+        intel_gpu=1
+        break
+    fi
+done
+
+if [ "$intel_gpu" -eq 1 ]; then
+    intel_render_node=
+    for render_node in /dev/dri/renderD*; do
+        if [ -c "$render_node" ]; then
+            intel_render_node=$render_node
+            break
+        fi
+    done
+
+    if [ -z "$intel_render_node" ]; then
+        echo "Intel GPU detected, but no /dev/dri/renderD* node is mounted in the container." >&2
+        exit 1
+    fi
+
+    if ! command -v setpriv >/dev/null 2>&1 || ! sudo -n true; then
+        echo "Intel GPU render node found, but sudo/setpriv is unavailable for assigning its device groups to Gazebo." >&2
+        exit 1
+    fi
+
+    gpu_group_ids=$(id -G | tr ' ' ',')
+    for gpu_device in /dev/dri/card* /dev/dri/renderD*; do
+        [ -c "$gpu_device" ] || continue
+        gpu_gid=$(stat -c '%g' "$gpu_device")
+        case ",${gpu_group_ids}," in
+            *,"${gpu_gid}",*) ;;
+            *) gpu_group_ids="${gpu_group_ids},${gpu_gid}" ;;
+        esac
+    done
+
+    # Render the simulation and sensors through EGL on Intel; Xvnc's GUI is separate.
+    echo "GPU Intel disponibile ($intel_render_node): server Gazebo headless su Mesa Iris"
+    sudo -n setpriv --reuid="$(id -u)" --regid="$(id -g)" \
+        --groups="$gpu_group_ids" env HOME="$(getent passwd "$(id -u)" | cut -d: -f6)" \
+        $gazebo_transport_args \
+        GZ_SIM_RESOURCE_PATH="$GZ_SIM_RESOURCE_PATH" \
+        GZ_SIM_SYSTEM_PLUGIN_PATH="${GZ_SIM_SYSTEM_PLUGIN_PATH:-}" \
+        LIBGL_ALWAYS_SOFTWARE=0 \
+        MESA_LOADER_DRIVER_OVERRIDE=iris gz sim -s -r --headless-rendering \
+        "$gz_world" & pids="$pids $!"
+    env $gazebo_transport_args gz sim -g & pids="$pids $!"
+elif command -v vglrun >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
     # container avviato con la GPU (tk3lab-run-gpu): tutto il rendering sulla NVIDIA
     #  - server: fisica + camera del follower renderizzata via EGL, senza display
     #  - GUI: renderizzata da VirtualGL e copiata nel desktop VNC
@@ -83,11 +139,11 @@ if command -v vglrun >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
     gz sim -s --headless-rendering $gz_world & pids="$pids $!"
     vglrun -d egl gz sim -g & pids="$pids $!"
 else
-    # senza GPU: rendering software (llvmpipe), molto più lento
-    echo "GPU NVIDIA non disponibile: rendering su CPU"
+    # Other supported GPUs can still be selected automatically by Mesa.
+    echo "GPU Intel/NVIDIA dedicata non rilevata: avvio Gazebo con renderer predefinito"
     gz sim $gz_world & pids="$pids $!"
 fi
 
-# wait for ctrl-C or any background process failure
-trap atexit CHLD
+# Wait for ctrl-C or an explicit termination signal. A CHLD trap would run the
+# global cleanup when any one component exits, even if the simulation is healthy.
 wait

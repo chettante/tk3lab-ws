@@ -3,7 +3,7 @@ import os
 import random
 import math
 import numpy as np 
-from final_project.config import genom_log_path
+from final_project.config import CONFIG, genom_log_path
 
 NHFC_GAINS = {'Kpxy': 5, 'Kpz': 5, 'Kqxy': 4, 'Kqz': 0.1,
               'Kvxy': 6, 'Kvz': 6, 'Kwxy': 1, 'Kwz': 0.1, 'Kixy': 0, 'Kiz': 0}
@@ -40,12 +40,7 @@ def setup_f(rotorcraft, pom, nhfc, maneuver,
   })
 
   # configure the free-space bounds within which trajectories can be planned
-  maneuver.set_bounds({
-      'xmin': -10, 'xmax': 10,
-      'ymin': -10, 'ymax': 10,
-      'zmin': 0,   'zmax': 10,
-      'yawmin': -3.14, 'yawmax': 3.14
-  })
+  maneuver.set_bounds(dict(CONFIG['maneuver_bounds']))
 
 
   #############################################
@@ -147,12 +142,7 @@ def setup_l(rotorcraft, pom, nhfc, maneuver,
   })
 
   # configure the free-space bounds within which trajectories can be planned
-  maneuver.set_bounds({
-      'xmin': -10, 'xmax': 10,
-      'ymin': -10, 'ymax': 10,
-      'zmin': 0,   'zmax': 10,
-      'yawmin': -3.14, 'yawmax': 3.14
-  })
+  maneuver.set_bounds(dict(CONFIG['maneuver_bounds']))
 
 
   #############################################
@@ -322,11 +312,11 @@ def stop():
 def random_trajectory(n_points):
   for i in range(n_points):
     maneuver_l.waypoint({
-      'x': random.uniform(-5, 5),
-      'y': random.uniform(-5, 5),
-      'z': random.uniform(0, 5),
+      'x': random.uniform(-10, 10),
+      'y': random.uniform(-10, 10),
+      'z': random.uniform(2, 10),
       'yaw': 0,
-      'duration': 15,
+      'duration': 0,
       'vx': 1,
       'vy': 1,
       'vz': 1,
@@ -357,7 +347,7 @@ def random_trajectory(n_points):
   #  })
 
   maneuver_l.waypoint({
-      'x': 2, 'y': 2, 'z': 0, 'yaw': 0, 'duration': 10,
+      'x': 2, 'y': 2, 'z': 1, 'yaw': 0, 'duration': 10,
       'vx': 0, 'vy': 0, 'vz': 0, 'wz': 0, 'ax': 0, 'ay': 0, 'az': 0
     })
 

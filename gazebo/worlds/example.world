@@ -59,15 +59,15 @@
     -->
 
     <include>
-      <uri>file:///home/chetto/tk3lab-ws/gazebo/models/mrsim-quadrotor-leader</uri>
+      <uri>file:///home/giuliano-livi/tk3lab-ws/gazebo/models/mrsim-quadrotor-leader</uri>
       <name>qr4_leading</name>
       <pose>-1 0 0.025 0 0 0</pose>
     </include>
 
     <include>
-      <uri>file:///home/chetto/tk3lab-ws/gazebo/models/mrsim-quadrotor</uri>
+      <uri>file:///home/giuliano-livi/tk3lab-ws/gazebo/models/mrsim-quadrotor</uri>
       <name>qr4_following</name>
-      <pose>-3 0 0.025 0 0 -0.785398</pose>
+      <pose>20 5 0.025 0 0 2.589938</pose>
     </include>
 
     <plugin name="gz::sim::systems::Sensors" filename="gz-sim-sensors-system">

@@ -32,9 +32,11 @@ from final_project.state_machine.state_machine import StateMachine, StateType
 from final_project.state_machine.state_idle import IdleState
 from final_project.state_machine.state_tracking import TrackingState
 from final_project.state_machine.state_searching import SearchingState
+from final_project.state_machine.state_exploring import ExploringState
 from final_project.components.trajectory_handler import *
 from final_project.config import CONFIG, config_path
 from final_project.components.Research import *
+from final_project.graphics.trajectory_plotter import plot_trajectory
 
 # Setup logging
 logging.basicConfig(
@@ -42,6 +44,17 @@ logging.basicConfig(
     format='[%(asctime)s] [%(name)s] %(levelname)s: %(message)s'
 )
 logger = logging.getLogger("MainControl")
+
+
+def save_real_follower_path(path_points, period, filename=None):
+    """Funzione temporanea per salvare il percorso reale del follower."""
+    if not path_points:
+        logger.warning("[TEMP] Nessun percorso del follower da plottare.")
+        return
+
+    out_file = filename or config_path('plot_real_trajectory')
+    plot_trajectory(path_points, dt=period, filename=out_file, show=False)
+    logger.info(f"[TEMP] Percorso reale del follower salvato in {out_file}")
 
 
 # ============================================================================
@@ -114,6 +127,8 @@ def main():
         optitrack_helper=optitrack_reader,
         follower_bodies=follower_bodies,
         idle_timeout=CONFIG['idle_timeout'],
+        maneuver_follower=maneuver_f,
+        spawn_lift_height=1.0,
     )
 
     tracking_state = TrackingState(
@@ -137,12 +152,28 @@ def main():
         maneuver_follower=maneuver_f,
     )
 
+    exploring_state = ExploringState(
+        camera=camera,
+        optitrack_helper=optitrack_reader,
+        follower_bodies=follower_bodies,
+        maneuver_follower=maneuver_f,
+        explore_bounds=CONFIG['explore_bounds'],
+        ring_clearance=CONFIG['explore_ring_clearance'],
+        top_clearance=CONFIG['explore_top_clearance'],
+        max_velocity=CONFIG['max_velocity'],
+        dt=CONFIG['control_loop_period'],
+        explore_timeout=CONFIG['exploring_timeout'],
+        explore_velocity=CONFIG['exploring_velocity'],
+        explore_yaw_rate=CONFIG['exploring_yaw_rate'],
+    )
+
     # State Machine
     sm = StateMachine(idle_state)
     idle_state.enter_time = time.time()
     sm.idle_state = idle_state
     sm.tracking_state = tracking_state
     sm.searching_state = searching_state
+    sm.exploring_state = exploring_state
 
     # ===== SET VELOCITY LIMITS =====
     logger.info("[*] Setting velocity limits...")
@@ -194,6 +225,7 @@ def main():
     pom_l.log_state(config_path('pom_leader_log'))
     pom_f.log_state(config_path('pom_follower_log'))
     loop_count = 0
+    follower_path = []
     x0, y0, z0 = CONFIG['leader_start_pos']
     maneuver_l.goto(x0, y0, z0, CONFIG['leader_start_yaw'], CONFIG['leader_start_duration'])
     
@@ -209,10 +241,14 @@ def main():
             # Aggiorna la traiettoria del leader (solo per l'otto)
             if not random_traj:
                 th.update_trajectory(maneuver_l)
-                
+
             # Esegui ciclo di update della state machine
             current_state = sm.get_current_state()
             sm.update()
+
+            follower_pos, _ = optitrack_reader(CONFIG['follower_body'])
+            if follower_pos is not None:
+                follower_path.append(tuple(np.asarray(follower_pos, dtype=float)))
 
             # Log dello stato ogni N cicli
             if loop_count % 100 == 0:
@@ -231,6 +267,9 @@ def main():
         # anche in caso di eccezione: ferma i droni e chiudi i log
         logger.info(f"[*] Loop terminato dopo {loop_count} cicli, stop dei droni")
         stop()
+
+    save_real_follower_path(follower_path, PERIOD, config_path('plot_real_trajectory'))
+
     if not random_traj:     # con i waypoint casuali non c'è una traiettoria pianificata da plottare
         #th.plot_trajectories(
             planned_path=config_path('plot_planned_trajectory'),

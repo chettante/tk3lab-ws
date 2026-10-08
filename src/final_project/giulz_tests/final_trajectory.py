@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+
+# cd tk3lab/releases/r-1.3/scripts/
+# sh tk3lab-run -g ionic -v 0.2
+
+
 import os
 import sys
 import time

@@ -21,7 +21,7 @@ CONFIG = {
     # semi-aperture = angolo tra l'asse ottico e le facce laterali (h) / superiore-inferiore (v)
     'fov_half_angle_h_deg': 43.5,   # orizzontale (sinistra/destra)
     'fov_half_angle_v_deg': 29.0,  # verticale (su/giù)
-    'fov_max_range': 5.0,          # m, piano far (profondità lungo l'asse ottico)
+    'fov_max_range': 10.0,          # m, piano far (profondità lungo l'asse ottico)
     'camera_yaw_deg': 45.0,         # montaggio camera: yaw rispetto all'asse x del drone
                                     # (+45° = bisettrice tra braccio 1 anteriore/rosso e braccio 2)
     'camera_gimbal': False,         # True = camera stabilizzata (solo yaw),
@@ -35,7 +35,7 @@ CONFIG = {
     # max_yaw_rate (sezione nhfc), uguali per i due droni.
     'tracking_kp_xy': 0.3,
     'tracking_kp_z': 0.6,
-    'tracking_follow_distance': 0.0,  # m, distanza orizzontale dal leader (lungo il bearing);
+    'tracking_follow_distance': 1.0,  # m, distanza orizzontale dal leader (lungo il bearing);
                                       # più grande = il bearing ruota più lentamente quando il leader curva
     'tracking_cmd_acc_max': 1.0,    # m/s², max variazione del comando di velocità (anti-scatto)
     'tracking_kp_angle': 1.5,       # 1/s: ritardo di yaw a regime ≈ velocità del bearing / kp_angle
@@ -47,7 +47,13 @@ CONFIG = {
     # ------------------------------------------------------------------
     # State machine timeouts
     # ------------------------------------------------------------------
-    'idle_timeout': 10.0,
+    'idle_timeout': 5.0,
+    'exploring_timeout': 20.0,
+    'exploring_velocity': 2.5,
+    'exploring_yaw_rate': 0.5,
+    'explore_bounds': ((-10.0, 10.0), (-10.0, 10.0), (0.0, 8.0)),
+    'explore_ring_clearance': 1.0,
+    'explore_top_clearance': 1.0,
     'tracking_timeout': 120.0,
     'out_of_fov_timeout': 0.1,      # grace period con predizione
 
@@ -70,8 +76,15 @@ CONFIG = {
         'Kixy': 0, 'Kiz': 0,
     },
     # limiti dei droni: impostati su maneuver per entrambi e usati per saturare il comando del follower
-    'max_velocity': 10.0,            # m/s
+    'max_velocity': 8.0,            # m/s
     'max_yaw_rate': 2.0,            # rad/s
+    # volume di volo per il planner maneuver: 100 m x 100 m x 50 m
+    'maneuver_bounds': {
+        'xmin': -50, 'xmax': 50,
+        'ymin': -50, 'ymax': 50,
+        'zmin': 0,   'zmax': 50,
+        'yawmin': -3.14, 'yawmax': 3.14,
+    },
 
     # ------------------------------------------------------------------
     # Droni / OptiTrack
@@ -87,10 +100,10 @@ CONFIG = {
     'leader_start_velocity': (0.0, 0.0, 0.0),  # m/s just to istantiate the searching class
     'leader_start_duration': 0.0,           # s (0 = il più veloce possibile)
 
-    'leader_random_trajectory': False,       # TEMP: waypoint casuali (random_trajectory) invece dell'otto
-    'random_traj_points': 3,                # numero di waypoint casuali (15 s ciascuno + 10 s finale)
+    'leader_random_trajectory': True,       # TEMP: waypoint casuali (random_trajectory) invece dell'otto
+    'random_traj_points': 10,                # numero di waypoint casuali (15 s ciascuno + 10 s finale)
 
-    'traj_duration': 40.0,                  # s, tempo in cui il leader completa l'otto
+    'traj_duration': 20.0,                  # s, tempo in cui il leader completa l'otto
     'traj_tail_time': 15.0,                 # s, il main continua ancora per questo tempo dopo la fine dell'otto
     'traj_A': 5.0,                          # ampiezza lungo y [m]
     'traj_B': 5.0,                          # ampiezza lungo x (semi-asse = B/2) [m]
@@ -110,10 +123,10 @@ CONFIG = {
     'search_T_rec': 0.5,            # s, durata minima del recupero e orizzonte di previsione
     'search_approach_dist': 3.0,    # m, distanza orizzontale dal leader previsto (< fov_max_range)
     'search_z_min': 0.5,            # m, limiti di quota nel recupero
-    'search_z_max': 12.0,
+    'search_z_max': 4.0,
     # scansione globale: home, salita di delta_z_global ruotando, discesa ruotando
     'search_home': (0.0, 0.0, 1.0),
-    'search_delta_z_global': 10.0,  # m
+    'search_delta_z_global': 3.0,   # apice = search_home.z + delta, allineato al tetto esplorazione
     'search_v_scan': 1.0,           # m/s, velocità di picco in salita/discesa
     'search_omega_scan': 0.5,       # rad/s, rotazione durante la scansione
     'search_t_hold': 1.0,           # s, durata delle attese da fermo
