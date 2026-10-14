@@ -31,31 +31,37 @@ CONFIG = {
     # Tracking controller, leader centrato nel FOV
     # ------------------------------------------------------------------
     # P + feedforward: v = v_leader + kp·(target − p), target = follow_distance
-    # dietro al leader lungo il bearing. Limiti di velocità/yaw: max_velocity e
-    # max_yaw_rate (sezione nhfc), uguali per i due droni.
+    # dietro al leader lungo il bearing. Limiti di velocità/yaw: follower_max_velocity
+    # e max_yaw_rate (sezione nhfc).
     'tracking_kp_xy': 0.3,
     'tracking_kp_z': 0.6,
-    'tracking_follow_distance': 1.0,  # m, distanza orizzontale dal leader (lungo il bearing);
+    'tracking_follow_distance': 3.0,  # m, distanza orizzontale dal leader (lungo il bearing);
                                       # più grande = il bearing ruota più lentamente quando il leader curva
-    'tracking_cmd_acc_max': 1.0,    # m/s², max variazione del comando di velocità (anti-scatto)
     'tracking_kp_angle': 1.5,       # 1/s: ritardo di yaw a regime ≈ velocità del bearing / kp_angle
-    'tracking_max_acc': 3.0,        # m/s², passato a maneuver con il comando di velocità
+    # accelerazione del tracking come budget di inclinazione: la camera è rigida, quindi
+    # ogni grado di tilt del follower sposta il leader di un grado nell'immagine (a qualsiasi
+    # distanza). Il main ricava a = g·tan(tilt) e la usa sia per il rate limiter del comando
+    # sia come limite passato a maneuver. 6° ≈ 1.0 m/s², 10° ≈ 1.7 m/s², 15° ≈ 2.6 m/s²
+    'tracking_max_tilt_deg': 10.0,
     # priorità allo yaw: la correzione di posizione (xy) cala linearmente da 100% a
     # |errore yaw| = yaw_priority_start fino a 0% al bordo del FOV (fov_half_angle_h_deg)
     'tracking_yaw_priority_start_deg': 25.0,
+    # priorità verticale: oltre questo angolo verticale del leader (frame camera) l'avvicinamento
+    # nel piano cala fino a 0 al bordo (fov_half_angle_v_deg); da vicino si arretra. Avvicinarsi
+    # da vicino fa crescere molto l'angolo verticale (atan(Δz/d)), da lontano quasi nulla
+    'tracking_vprio_start_deg': 23.0,
 
     # ------------------------------------------------------------------
     # State machine timeouts
     # ------------------------------------------------------------------
     'idle_timeout': 5.0,
-    'exploring_timeout': 20.0,
-    'exploring_velocity': 2.5,
-    'exploring_yaw_rate': 0.5,
-    'explore_bounds': ((-10.0, 10.0), (-10.0, 10.0), (0.0, 8.0)),
+    'exploring_velocity': 10.0,
+    'exploring_yaw_rate': 2.0,
+    'exploring_acc_max': 1.5,       # m/s², accelerazione di picco del tratto di collegamento all'anello
+    'explore_bounds': ((-10.0, 10.0), (-10.0, 10.0), (5.0, 15.0)),
     'explore_ring_clearance': 1.0,
     'explore_top_clearance': 1.0,
-    'tracking_timeout': 120.0,
-    'out_of_fov_timeout': 0.1,      # grace period con predizione
+    'out_of_fov_timeout': 2.0,      # grace period con predizione
 
     # ------------------------------------------------------------------
     # Loop di controllo e logging a terminale
@@ -75,13 +81,17 @@ CONFIG = {
         'Kvxy': 6, 'Kvz': 6, 'Kwxy': 1, 'Kwz': 0.1,
         'Kixy': 0, 'Kiz': 0,
     },
-    # limiti dei droni: impostati su maneuver per entrambi e usati per saturare il comando del follower
-    'max_velocity': 8.0,            # m/s
-    'max_yaw_rate': 2.0,            # rad/s
+    # limiti dei droni (maneuver). Il leader ha velocità di crociera leader_speed (sezione
+    # Leader); il follower deve poterlo superare: follower_max_velocity ≳ 1.3·leader_speed
+    'leader_max_velocity': 50.0,     # m/s, limite maneuver del leader (≥ leader_speed)
+    'leader_max_acc': 50.0,          # m/s², limite maneuver del leader
+    'follower_max_velocity': 50.0,   # m/s, limite maneuver del follower + saturazione tracking/exploring/search
+    'max_yaw_rate': 2.0,            # rad/s, entrambi i droni
+    'max_yaw_acc': 2.0,             # rad/s², limite di accelerazione angolare del leader
     # volume di volo per il planner maneuver: 100 m x 100 m x 50 m
     'maneuver_bounds': {
-        'xmin': -50, 'xmax': 50,
-        'ymin': -50, 'ymax': 50,
+        'xmin': -110, 'xmax': 110,
+        'ymin': -110, 'ymax': 110,
         'zmin': 0,   'zmax': 50,
         'yawmin': -3.14, 'yawmax': 3.14,
     },
@@ -92,43 +102,54 @@ CONFIG = {
     'leader_body': 'QR4_leading',
     'follower_body': 'QR4_following',
 
+    # spawn del follower in Gazebo (il leader parte da (-1, 0) nel world). Lo applica
+    # sync_camera_fov.py al lancio di quad_simulation.sh, insieme allo yaw che punta la
+    # camera sul leader: serve riavviare la simulazione per cambiarlo.
+    #   'near' = leader nel FOV allo spawn: si passa subito a TRACKING (testa il controllore)
+    #   'far'  = leader fuori portata: IDLE -> EXPLORING -> ... (testa l'esplorazione)
+    'follower_spawn_mode': 'far',
+    'follower_spawn_near_xy': (-3.0, 0.0),
+    'follower_spawn_far_xy': (20.0, 5.0),
+
     # ------------------------------------------------------------------
     # Leader: posizione iniziale e traiettoria a otto
     # ------------------------------------------------------------------
-    'leader_start_pos': (-1.0, 0.0, 1.0),   # goto iniziale (x, y, z) [m]
+    'leader_start_pos': (-1.0, 0.0, 5.0),   # goto iniziale (x, y, z) [m]
     'leader_start_yaw': 0.0,                # rad
-    'leader_start_velocity': (0.0, 0.0, 0.0),  # m/s just to istantiate the searching class
-    'leader_start_duration': 0.0,           # s (0 = il più veloce possibile)
+    'follower_takeoff_z': 1.0,              # m, il follower decolla in verticale sullo spawn insieme al leader
+    'leader_takeoff_tol': 0.15,             # m, distanza dal target di decollo (entrambi i droni)
+    'leader_takeoff_timeout': 5.0,         # s, oltre si parte comunque
+    'leader_takeoff_hold': 2.0,             # s, hover su leader_start_pos prima della traiettoria
+
+    # velocità di crociera del leader, sia sull'otto sia sui waypoint casuali:
+    # la durata della traiettoria si ricava da questa
+    'leader_speed': 40.0,                    # m/s
 
     'leader_random_trajectory': True,       # TEMP: waypoint casuali (random_trajectory) invece dell'otto
-    'random_traj_points': 10,                # numero di waypoint casuali (15 s ciascuno + 10 s finale)
-
-    'traj_duration': 20.0,                  # s, tempo in cui il leader completa l'otto
+    'random_traj_points': 100,               # numero di waypoint casuali (+ un punto finale fermo)
+    'random_traj_z_range': (5.0, 15.0),      # m, quote dei waypoint (dentro explore_bounds)
+    'random_traj_xy_range': 100.0,           # m, x e y estratti in [-range, +range]
+     
     'traj_tail_time': 15.0,                 # s, il main continua ancora per questo tempo dopo la fine dell'otto
     'traj_A': 5.0,                          # ampiezza lungo y [m]
     'traj_B': 5.0,                          # ampiezza lungo x (semi-asse = B/2) [m]
     'traj_H': 5.0,                          # quota massima sopra P0 [m]
-    'traj_P0': (-1.0, 0.0, 1.0),            # punto di partenza/arrivo (di norma = leader_start_pos)
 
     # ------------------------------------------------------------------
     # Follower: Research strategy parameters
     # ------------------------------------------------------------------
-    'traj_duration_research' : 70.0,
-    'follower_start_pos': (0.0, 0.0, 0.0),
-    'follower_start_yaw': 0.0,
-
     # recupero: un tratto verso la posizione PREVISTA del leader
     # p_pred = p_last + v_last·(t_lost + T): ruota per centrarlo, si avvicina
     # se è oltre approach_dist, va alla sua quota prevista
-    'search_T_rec': 0.5,            # s, durata minima del recupero e orizzonte di previsione
+    'search_T_rec': 0.2,            # s, durata minima del recupero e orizzonte di previsione
     'search_approach_dist': 3.0,    # m, distanza orizzontale dal leader previsto (< fov_max_range)
-    'search_z_min': 0.5,            # m, limiti di quota nel recupero
-    'search_z_max': 4.0,
+    'search_z_min': 5.5,            # m, limiti di quota nel recupero
+    'search_z_max': 15.0,
     # scansione globale: home, salita di delta_z_global ruotando, discesa ruotando
-    'search_home': (0.0, 0.0, 1.0),
+    'search_home': (0.0, 0.0, 5.0),
     'search_delta_z_global': 3.0,   # apice = search_home.z + delta, allineato al tetto esplorazione
-    'search_v_scan': 1.0,           # m/s, velocità di picco in salita/discesa
-    'search_omega_scan': 0.5,       # rad/s, rotazione durante la scansione
+    'search_v_scan': 5.0,           # m/s, velocità di picco in salita/discesa
+    'search_omega_scan': 2.0,       # rad/s, rotazione durante la scansione
     'search_t_hold': 1.0,           # s, durata delle attese da fermo
     'search_a_max': 1.5,            # m/s², accelerazione di picco dei tratti di ricerca
     'search_yaw_acc_max': 2.0,      # rad/s², accelerazione angolare di picco nel recupero

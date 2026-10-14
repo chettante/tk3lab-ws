@@ -44,6 +44,15 @@ class TrajectoryHandler:
         self._step = 0  # indice del prossimo punto da inviare
         self._stop_sent = False
 
+    @classmethod
+    def from_speed(cls, speed, **kwargs):
+        """Crea l'otto percorso alla velocità di crociera `speed` [m/s]:
+        la durata si ricava dalla lunghezza dell'otto (inverso di cruise_speed)."""
+        geometry = {k: kwargs[k] for k in ("A", "B", "H", "P0", "arc_resolution") if k in kwargs}
+        probe = cls(duration=1.0, period=1.0, **geometry)    # solo per la lunghezza del percorso
+        duration = probe._PATH_LENGTH / (speed * (1.0 - 0.5 * 0.15))
+        return cls(duration=duration, **kwargs)
+
     @property
     def cruise_speed(self):
         """Velocità di crociera [m/s] lungo l'otto (vedi otto_time_law, ramp_fraction=0.15)."""

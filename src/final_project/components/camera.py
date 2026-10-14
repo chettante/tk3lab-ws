@@ -133,10 +133,13 @@ class TrackingController:
     def __init__(self, follower, velocity_estimator=None,
                  kp_xy=0.3, kp_z=0.6, follow_distance=1.5, cmd_acc_max=1.0,
                  yaw_priority_start_deg=25.0, yaw_priority_end_deg=45.0,
+                 vprio_start_deg=18.0, vprio_end_deg=29.0,
                  max_velocity=2.5, *, yaw_rate_max):
         self.follower = follower
         # priorità allo yaw: sopra start la correzione xy cala, a end è nulla
         self.yaw_prio = np.radians([yaw_priority_start_deg, yaw_priority_end_deg])
+        # priorità verticale: sopra start l'avvicinamento nel piano cala, a end è nullo
+        self.v_prio = np.radians([vprio_start_deg, vprio_end_deg])
         self.follow_distance = follow_distance   # m, distanza orizzontale dal leader
         self.cmd_acc_max = cmd_acc_max           # m/s², max variazione del comando di velocità
         self.max_velocity = max_velocity         # m/s, limite del drone (come il leader)
@@ -146,8 +149,11 @@ class TrackingController:
         self.t_prev = None
         self.last_cmd = np.zeros(3)
 
-    def reset(self):                    # da chiamare in TrackingState.enter()
-        self.t_prev = None; self.last_cmd[:] = 0
+    def reset(self, follower_vel=None):
+        """Da chiamare all'ingresso in TRACKING. Con follower_vel (velocità misurata) il
+        rate limiter parte dal moto reale invece che da fermo (bumpless transfer)."""
+        self.t_prev = None
+        self.last_cmd[:] = 0 if follower_vel is None else np.asarray(follower_vel, dtype=float)
 
     def compute_command(self, leader_pos, follower_pos, follower_yaw,
                         camera, leader_vel, kp_angle=1.0, follower_vel=None):
@@ -170,6 +176,17 @@ class TrackingController:
 
         # P + feedforward: v = v_leader + kp·(target − p)
         v_corr = self.kp * (target - follower_pos)
+
+        # priorità verticale: la camera è rigida, il leader resta in verticale solo cambiando
+        # quota o distanza (angolo ≈ atan(Δz/d)). Da vicino avvicinarsi fa crescere molto
+        # l'angolo: vicino al bordo verticale si annulla la componente di avvicinamento
+        # (l'arretramento, se d < follow_distance, resta pieno), la quota resta piena
+        elev = abs(np.arctan2(rel[2], d_xy))
+        lo_v, hi_v = self.v_prio
+        v_prio = np.clip((hi_v - elev) / (hi_v - lo_v), 0.0, 1.0)
+        approach = v_corr[:2] @ u
+        if approach > 0.0:
+            v_corr[:2] -= (1.0 - v_prio) * approach * u
 
         # priorità allo yaw: se il leader si avvicina al bordo del FOV, prima si ruota
         # per ricentrarlo e solo dopo si corregge la posizione nel piano

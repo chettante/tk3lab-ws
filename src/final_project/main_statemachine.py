@@ -25,6 +25,7 @@ if __package__ in (None, ""):
 
 # Import config and core modules
 from final_project.components.functions import *
+from final_project.components.functions import _quat_to_yaw
 from final_project.components.camera import FOVPyramid, TrackingController
 from final_project.components.velocity_estimator import VelocityEstimator
 from final_project.components.optitrack_helper import create_optitrack_reader
@@ -87,6 +88,9 @@ def main():
     # Velocity estimator
     vel_estimator = VelocityEstimator()
 
+    # accelerazione del tracking dal budget di inclinazione: a = g·tan(tilt)
+    tracking_acc = 9.81 * np.tan(np.radians(CONFIG['tracking_max_tilt_deg']))
+
     # Tracking controller
     tracker = TrackingController(
     follower=maneuver_f,
@@ -94,18 +98,22 @@ def main():
     kp_xy=CONFIG['tracking_kp_xy'],
     kp_z=CONFIG['tracking_kp_z'],
     follow_distance=CONFIG['tracking_follow_distance'],
-    cmd_acc_max=CONFIG['tracking_cmd_acc_max'],
+    cmd_acc_max=tracking_acc,
     yaw_priority_start_deg=CONFIG['tracking_yaw_priority_start_deg'],
     yaw_priority_end_deg=CONFIG['fov_half_angle_h_deg'],   # fine priorità = bordo del FOV
-    max_velocity=CONFIG['max_velocity'],                  # stessi limiti del leader
+    vprio_start_deg=CONFIG['tracking_vprio_start_deg'],
+    vprio_end_deg=CONFIG['fov_half_angle_v_deg'],           # fine priorità verticale = bordo del FOV
+    max_velocity=CONFIG['follower_max_velocity'],
     yaw_rate_max=CONFIG['max_yaw_rate'],
     )
 
     #Research Strategy
       
     search = LeaderSearchManeuver(
-           p_follower0 = CONFIG['follower_start_pos'], yaw0=CONFIG['follower_start_yaw'], p_leader_last=CONFIG['leader_start_pos'], v_leader_last=CONFIG['leader_start_velocity'], dt=CONFIG['control_loop_period'],
-           v_max=CONFIG['max_velocity'], v_scan=CONFIG['search_v_scan'],
+           # valori iniziali neutri: il piano viene ricalcolato in SearchingState.enter()
+           p_follower0=np.zeros(3), yaw0=0.0, p_leader_last=CONFIG['leader_start_pos'],
+           v_leader_last=np.zeros(3), dt=CONFIG['control_loop_period'],
+           v_max=CONFIG['follower_max_velocity'], v_scan=CONFIG['search_v_scan'],
            delta_z_global=CONFIG['search_delta_z_global'], omega_scan=CONFIG['search_omega_scan'],
            yaw_rate_max=CONFIG['max_yaw_rate'], t_hold=CONFIG['search_t_hold'],
            a_max=CONFIG['search_a_max'], yaw_acc_max=CONFIG['search_yaw_acc_max'],
@@ -127,8 +135,6 @@ def main():
         optitrack_helper=optitrack_reader,
         follower_bodies=follower_bodies,
         idle_timeout=CONFIG['idle_timeout'],
-        maneuver_follower=maneuver_f,
-        spawn_lift_height=1.0,
     )
 
     tracking_state = TrackingState(
@@ -137,9 +143,8 @@ def main():
     optitrack_helper=optitrack_reader,
     follower_bodies=follower_bodies,
     kp_angle=CONFIG['tracking_kp_angle'],
-    max_acc=CONFIG['tracking_max_acc'],
+    max_acc=tracking_acc,
     out_of_fov_timeout=CONFIG['out_of_fov_timeout'],
-    tracking_timeout=CONFIG['tracking_timeout'],
     )
 
     searching_state = SearchingState(
@@ -160,9 +165,9 @@ def main():
         explore_bounds=CONFIG['explore_bounds'],
         ring_clearance=CONFIG['explore_ring_clearance'],
         top_clearance=CONFIG['explore_top_clearance'],
-        max_velocity=CONFIG['max_velocity'],
+        max_velocity=CONFIG['follower_max_velocity'],
+        max_acc=CONFIG['exploring_acc_max'],
         dt=CONFIG['control_loop_period'],
-        explore_timeout=CONFIG['exploring_timeout'],
         explore_velocity=CONFIG['exploring_velocity'],
         explore_yaw_rate=CONFIG['exploring_yaw_rate'],
     )
@@ -177,37 +182,78 @@ def main():
 
     # ===== SET VELOCITY LIMITS =====
     logger.info("[*] Setting velocity limits...")
-    # droni identici: stessi limiti (lineare m/s, angolare rad/s) per leader e follower
-    for m in (maneuver_l, maneuver_f):
-        m.set_velocity_limit(CONFIG['max_velocity'], CONFIG['max_yaw_rate'])
-    logger.info(f"  Max velocity (both): {CONFIG['max_velocity']} m/s, "
-                f"max yaw rate: {CONFIG['max_yaw_rate']} rad/s")
+    maneuver_l.set_velocity_limit(CONFIG['leader_max_velocity'], CONFIG['max_yaw_rate'])
+    maneuver_l.set_acceleration_limit(CONFIG['leader_max_acc'], CONFIG['max_yaw_acc'])
+    maneuver_f.set_velocity_limit(CONFIG['follower_max_velocity'], CONFIG['max_yaw_rate'])
+    logger.info(f"  Leader: speed {CONFIG['leader_speed']} m/s, limits "
+                f"{CONFIG['leader_max_velocity']} m/s, {CONFIG['leader_max_acc']} m/s²")
+    logger.info(f"  Follower: max velocity {CONFIG['follower_max_velocity']} m/s, tracking acc "
+                f"{tracking_acc:.2f} m/s² (tilt {CONFIG['tracking_max_tilt_deg']}°)")
+    logger.info(f"  Max yaw rate (both): {CONFIG['max_yaw_rate']} rad/s")
+
+    # coerenza dei limiti
+    if CONFIG['leader_speed'] > CONFIG['leader_max_velocity']:
+        logger.warning(f"  leader_speed={CONFIG['leader_speed']} m/s > leader_max_velocity="
+                       f"{CONFIG['leader_max_velocity']} m/s: il leader non seguirà la traiettoria")
+    if CONFIG['follower_max_velocity'] < 1.3 * CONFIG['leader_speed']:
+        logger.warning(f"  follower_max_velocity={CONFIG['follower_max_velocity']} m/s < 1.3·leader_speed: "
+                       "il follower ha poco margine per recuperare il leader")
+    if tracking_acc < 1.2 * CONFIG['leader_max_acc']:
+        logger.warning(f"  accelerazione di tracking {tracking_acc:.2f} m/s² < 1.2·leader_max_acc: "
+                       "il follower accelera meno del leader (aumenta tracking_max_tilt_deg)")
+    if CONFIG['tracking_max_tilt_deg'] > CONFIG['fov_half_angle_v_deg'] / 2:
+        logger.warning(f"  tracking_max_tilt_deg={CONFIG['tracking_max_tilt_deg']}° > metà del FOV "
+                       "verticale: l'inclinazione può far uscire il leader dall'inquadratura")
 
     PERIOD = CONFIG['control_loop_period']
 
     
 
     # select the trajectory for the leader
-    th = TrajectoryHandler(
+    th = TrajectoryHandler.from_speed(
+        CONFIG['leader_speed'],
         period=PERIOD,
-        duration=CONFIG['traj_duration'],
         A=CONFIG['traj_A'],
         B=CONFIG['traj_B'],
         H=CONFIG['traj_H'],
-        P0=np.array(CONFIG['traj_P0'], dtype=float),
+        P0=np.array(CONFIG['leader_start_pos'], dtype=float),   # l'otto parte da dove decolla il leader
         position_reader=optitrack_reader,
         leader_body_name=CONFIG['leader_body'],
     )
-    if th.cruise_speed > CONFIG['max_velocity']:
-        logger.warning(
-            f"  traj_duration={CONFIG['traj_duration']}s richiede {th.cruise_speed:.2f} m/s "
-            f"> max_velocity={CONFIG['max_velocity']} m/s: il leader non riuscirà "
-            "a seguire la traiettoria (aumenta traj_duration o max_velocity)"
+
+    random_traj = CONFIG['leader_random_trajectory']
+
+    pom_l.log_state(config_path('pom_leader_log'))
+    pom_f.log_state(config_path('pom_follower_log'))
+    loop_count = 0
+    follower_path = []
+    # decollo: leader su leader_start_pos, follower in verticale sullo spawn (stesso yaw)
+    pf, qf = optitrack_reader(CONFIG['follower_body'])
+    targets = {CONFIG['leader_body']: np.array(CONFIG['leader_start_pos'], dtype=float),
+               CONFIG['follower_body']: np.array([pf[0], pf[1], CONFIG['follower_takeoff_z']])}
+    maneuver_f.goto(*targets[CONFIG['follower_body']], _quat_to_yaw(qf), 0, ack=True)
+    maneuver_l.goto(*targets[CONFIG['leader_body']], CONFIG['leader_start_yaw'], 0)   # durata 0 = il più veloce possibile
+    # goto può ritornare prima che i droni siano arrivati: si aspetta la posizione reale, poi hover
+    t_end = time.monotonic() + CONFIG['leader_takeoff_timeout']
+    while time.monotonic() < t_end:
+        ps = [optitrack_reader(b)[0] for b in targets]
+        if all(p is not None and np.linalg.norm(np.asarray(p) - t) < CONFIG['leader_takeoff_tol']
+               for p, t in zip(ps, targets.values())):
+            break
+        time.sleep(PERIOD)
+    time.sleep(CONFIG['leader_takeoff_hold'])
+
+    if random_traj:
+        # accoda i waypoint in maneuver_l: vengono eseguiti da maneuver, senza comandi dal loop
+        traj_time = random_trajectory(
+            CONFIG['random_traj_points'], start=CONFIG['leader_start_pos'],
+            speed=CONFIG['leader_speed'], z_range=CONFIG['random_traj_z_range'],
+            xy_range=CONFIG['random_traj_xy_range'],
         )
+    else:
+        traj_time = th.duration
 
     # il loop dura quanto la traiettoria del leader + una coda finale
-    random_traj = CONFIG['leader_random_trajectory']
-    traj_time = (15.0 * CONFIG['random_traj_points'] + 10.0) if random_traj else CONFIG['traj_duration']
     max_loops = int(np.ceil((traj_time + CONFIG['traj_tail_time']) / PERIOD))
 
     # ===== MAIN CONTROL LOOP =====
@@ -215,23 +261,13 @@ def main():
     logger.info(f"     Period: {PERIOD}s ({1/PERIOD:.0f} Hz)")
     if random_traj:
         logger.info(f"     Leader trajectory: RANDOM, {CONFIG['random_traj_points']} waypoints "
-                    f"({traj_time:.0f}s), tail {CONFIG['traj_tail_time']}s -> {max_loops} loops")
+                    f"({traj_time:.0f}s at ~{CONFIG['leader_speed']} m/s), "
+                    f"tail {CONFIG['traj_tail_time']}s -> {max_loops} loops")
     else:
-        logger.info(f"     Leader trajectory: {CONFIG['traj_duration']}s "
+        logger.info(f"     Leader trajectory: figure-8 {traj_time:.1f}s "
                     f"(cruise {th.cruise_speed:.2f} m/s), tail {CONFIG['traj_tail_time']}s "
                     f"-> {max_loops} loops")
     logger.info("=" * 80)
-
-    pom_l.log_state(config_path('pom_leader_log'))
-    pom_f.log_state(config_path('pom_follower_log'))
-    loop_count = 0
-    follower_path = []
-    x0, y0, z0 = CONFIG['leader_start_pos']
-    maneuver_l.goto(x0, y0, z0, CONFIG['leader_start_yaw'], CONFIG['leader_start_duration'])
-    
-    if random_traj:
-        # accoda i waypoint in maneuver_l: vengono eseguiti da maneuver, senza comandi dal loop
-        random_trajectory(CONFIG['random_traj_points'])
     next_t = time.monotonic()
 
     try:

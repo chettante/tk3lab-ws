@@ -1,12 +1,12 @@
 import genomix
+from genomix.event import GenoMError
 import os
 import random
 import math
 import numpy as np 
 from final_project.config import CONFIG, genom_log_path
 
-NHFC_GAINS = {'Kpxy': 5, 'Kpz': 5, 'Kqxy': 4, 'Kqz': 0.1,
-              'Kvxy': 6, 'Kvz': 6, 'Kwxy': 1, 'Kwz': 0.1, 'Kixy': 0, 'Kiz': 0}
+NHFC_GAINS = CONFIG['nhfc_gains']
 
 
 # this connects to components running on the same host (localhost)
@@ -309,47 +309,62 @@ def stop():
 
 
 
-def random_trajectory(n_points):
-  for i in range(n_points):
-    maneuver_l.waypoint({
-      'x': random.uniform(-10, 10),
-      'y': random.uniform(-10, 10),
-      'z': random.uniform(2, 10),
-      'yaw': 0,
-      'duration': 0,
-      'vx': 1,
-      'vy': 1,
-      'vz': 1,
-      'wz': 0,
-      'ax': 1,
-      'ay': 1,
-      'az': 1
-    })
+def random_trajectory(n_points, start, speed, z_range=(2.0, 6.0), xy_range=10.0,
+                      maneuver=None, min_segment=2.0, max_retries=8):
+  """
+  Accoda in maneuver (default maneuver_l) n_points waypoint casuali più un punto
+  finale fermo, tutti con quota in z_range (il leader non scende mai sotto z_min).
+  - durata di ogni tratto = distanza / speed (almeno min_segment s):
+    velocità media ≈ speed, indipendente da quanto sono lontani i punti
+  - velocità di passaggio sui waypoint = speed lungo la tangente di Catmull-Rom
+    (direzione precedente → successivo), così il moto è fluido; sul punto finale 0
+  Se maneuver rifiuta un tratto per i limiti (e_limits), la sua durata viene allungata.
+  Ritorna la durata totale [s].
+  """
+  maneuver = maneuver_l if maneuver is None else maneuver
+  z_min, z_max = z_range
+  pts = [np.asarray(start, dtype=float)]
+  for _ in range(n_points):
+    pts.append(np.array([random.uniform(-xy_range, xy_range),
+                         random.uniform(-xy_range, xy_range),
+                         random.uniform(z_min, z_max)]))
+  pts.append(np.array([random.uniform(-xy_range, xy_range),
+                       random.uniform(-xy_range, xy_range), z_min]))
 
-    #maneuver_f.waypoint({
-    #    'x': random.uniform(-5, 5),
-    #    'y': random.uniform(-5, 5),
-    #    'z': random.uniform(0, 5),
-    #    'yaw': 0,
-    #    'duration': 15,
-    #    'vx': 1,
-    #    'vy': 1,
-    #    'vz': 1,
-    #    'wz': 0,
-    #    'ax': 1,
-    #    'ay': 1,
-    #    'az': 1
-    #  })
-
-  #maneuver_f.waypoint({
-  #    'x': 0, 'y': 0, 'z': 0, 'yaw': 0, 'duration': 10,
-  #    'vx': 0, 'vy': 0, 'vz': 0, 'wz': 0, 'ax': 0, 'ay': 0, 'az': 0
-  #  })
-
-  maneuver_l.waypoint({
-      'x': 2, 'y': 2, 'z': 1, 'yaw': 0, 'duration': 10,
-      'vx': 0, 'vy': 0, 'vz': 0, 'wz': 0, 'ax': 0, 'ay': 0, 'az': 0
-    })
+  total = 0.0
+  for i in range(1, len(pts)):
+    duration = max(min_segment, np.linalg.norm(pts[i] - pts[i - 1]) / speed)
+    if i < len(pts) - 1:
+      tangent = pts[i + 1] - pts[i - 1]
+      v = speed * tangent / max(np.linalg.norm(tangent), 1e-6)
+    else:
+      v = np.zeros(3)                       # punto finale: fermo
+    # maneuver rifiuta (e_limits) un tratto che con questa durata violerebbe i limiti di
+    # velocità/accelerazione del leader: si riprova allungandolo, al limite duration=0
+    # (il più veloce possibile entro i limiti)
+    for _ in range(max_retries):
+      try:
+        maneuver.waypoint({
+          'x': pts[i][0], 'y': pts[i][1], 'z': pts[i][2], 'yaw': 0,
+          'duration': 0,
+          'vx': 0, 'vy': 0, 'vz': 0, 'wz': 0,
+          'ax': 0, 'ay': 0, 'az': 0
+        })
+        break
+      except GenoMError as e:
+        if 'e_limits' not in str(e):
+          raise
+        duration *= 1.3
+    else:
+      maneuver.waypoint({
+        'x': pts[i][0], 'y': pts[i][1], 'z': pts[i][2], 'yaw': 0,
+        'duration': 0,
+        'vx': v[0], 'vy': v[1], 'vz': v[2], 'wz': 0,
+        'ax': 0, 'ay': 0, 'az': 0
+      })
+      duration = np.linalg.norm(pts[i] - pts[i - 1]) / speed   # stima per max_loops
+    total += duration
+  return total
 
 
 def compute_follower_target_3d(P_leader, P_follower, step):

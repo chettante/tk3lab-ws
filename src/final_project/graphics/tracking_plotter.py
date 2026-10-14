@@ -29,7 +29,7 @@ import sys
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
+from matplotlib.patches import Wedge
 
 # permette l'esecuzione diretta (python3 velocity_plotter.py) leggendo final_project/config.py
 _SRC_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -145,6 +145,8 @@ def main():
                     help="semi-apertura verticale (gradi)")
     ap.add_argument("--max-range", type=float, default=CONFIG["fov_max_range"])
     ap.add_argument("--rate", type=float, default=20.0, help="Hz della griglia comune")
+    ap.add_argument("--mark-every", type=float, default=5.0,
+                    help="secondi tra i marcatori temporali nella vista dall'alto")
     ap.add_argument("--crop", type=float, nargs=2, metavar=("T0", "T1"),
                     help="tieni solo [T0, T1] secondi dall'inizio dell'intervallo comune")
     ap.add_argument("--cols", type=int, nargs=6, metavar=("X", "Y", "Z", "ROLL", "PITCH", "YAW"))
@@ -200,7 +202,9 @@ def main():
     ax1.set_ylabel("Leader − follower [m]")
     ax1.set_title("Distanza dal leader (frame globale)")
     ax1.grid(alpha=0.3)
-    ax1.legend(loc="upper right", ncol=5, fontsize=8)
+    ax1.fill_between([], [], color="tab:red", alpha=0.15, lw=0,
+                     label="leader fuori FOV (camera " + ("gimbal" if gimbal else "rigida") + ")")
+    ax1.legend(loc="upper right", ncol=4, fontsize=8)
 
     ax2.plot(t, yaw_err, color="tab:red", lw=1.4)
     ax2.axhline(0, color="gray", lw=0.6)
@@ -224,49 +228,52 @@ def main():
     ax4.grid(alpha=0.3)
     ax4.legend(loc="upper right", fontsize=8)
 
-    # tratti con il leader fuori FOV: fascia rossa sotto entrambe le traiettorie
-    # (NaN dove il leader è nel FOV, così la linea si interrompe)
+    # ---- vista dall'alto ----
+    # follower continuo quando vede il leader, tratteggiato e sbiadito quando lo ha perso
     out = ~fov
-    out_line = out | np.r_[out[1:], False] | np.r_[False, out[:-1]]   # estende di un campione: niente buchi ai bordi
-    for P in (L, F):
-        ax3.plot(np.where(out_line, P[:, 0], np.nan), np.where(out_line, P[:, 1], np.nan),
-                 color="tab:red", lw=7, alpha=0.3, solid_capstyle="round", zorder=1)
     ax3.plot(L[:, 0], L[:, 1], color="tab:blue", lw=1.6, label="Leader", zorder=2)
-    ax3.plot(F[:, 0], F[:, 1], color="tab:orange", lw=1.6, label="Follower", zorder=2)
-    # inizio di ogni perdita del leader: croce rossa sulla posizione del leader
-    lost = np.flatnonzero(out & ~np.r_[False, out[:-1]])
-    ax3.plot(L[lost, 0], L[lost, 1], "x", color="tab:red", ms=9, mew=2, zorder=4,
-             label="Leader perso (inizio)")
-    ax3.plot([], [], color="tab:red", lw=7, alpha=0.3, label="Leader fuori FOV")
-    step = max(1, int(round(2.0 * args.rate)))          # collegamento ogni ~2 s
-    for i in range(0, len(t), step):
-        ax3.plot([L[i, 0], F[i, 0]], [L[i, 1], F[i, 1]], color="gray", lw=0.6, alpha=0.6)
-    for P, c in ((L, "tab:blue"), (F, "tab:orange")):
-        ax3.plot(*P[0, :2], "o", color=c, ms=8)
-        ax3.plot(*P[-1, :2], "s", color=c, ms=8)
-    # asse ottico della camera ogni ~1 s: freccia + bordi del FOV
-    h_step = max(1, int(round(1.0 * args.rate)))
-    idx = np.arange(0, len(t), h_step)
+    seen = np.where(fov | np.r_[fov[1:], False], F[:, 0], np.nan), \
+        np.where(fov | np.r_[fov[1:], False], F[:, 1], np.nan)
+    lost_xy = np.where(out | np.r_[out[1:], False], F[:, 0], np.nan), \
+        np.where(out | np.r_[out[1:], False], F[:, 1], np.nan)
+    ax3.plot(*seen, color="tab:orange", lw=1.8, label="Follower (leader nel FOV)", zorder=2)
+    ax3.plot(*lost_xy, color="tab:orange", lw=1.4, ls=(0, (3, 2)), alpha=0.55,
+             label="Follower (leader fuori FOV)", zorder=2)
+
+    # marcatori temporali: stesse istanti su entrambe le traiettorie + ventaglio del FOV
     span = np.ptp(np.vstack([L[:, :2], F[:, :2]]), axis=0).max()
-    arrow = 0.06 * max(span, 1.0)                        # lunghezza freccia in m
+    fan_r = 0.06 * max(span, 1.0)
     half = np.radians(args.fov_deg)
-    for s in (-half, half):
-        ax3.plot(np.vstack([F[idx, 0], F[idx, 0] + 0.7 * arrow * np.cos(yaw[idx] + s)]),
-                 np.vstack([F[idx, 1], F[idx, 1] + 0.7 * arrow * np.sin(yaw[idx] + s)]),
-                 color="tab:red", lw=0.6, alpha=0.5)
-    ax3.quiver(F[idx, 0], F[idx, 1], np.cos(yaw[idx]), np.sin(yaw[idx]),
-               color="tab:red", angles="xy", scale_units="xy", scale=1.0 / arrow,
-               width=0.004, zorder=3)
-    ax3.plot([], [], color="tab:red", lw=1.5, label=f"Asse camera follower (±{args.fov_deg:g}° FOV)")
+    marks = np.searchsorted(t, np.arange(0.0, t[-1], args.mark_every))
+    last_label = None                                     # niente etichette sovrapposte (drone fermo)
+    for i in marks:
+        ax3.plot([L[i, 0], F[i, 0]], [L[i, 1], F[i, 1]], color="0.6", lw=0.7, ls=":", zorder=1)
+        ax3.add_patch(Wedge(F[i, :2], fan_r, np.degrees(yaw[i] - half), np.degrees(yaw[i] + half),
+                            color="tab:red", alpha=0.12, lw=0, zorder=1))
+        for P, c in ((L, "tab:blue"), (F, "tab:orange")):
+            ax3.plot(*P[i, :2], "o", ms=4, color=c, mec="white", mew=0.8, zorder=3)
+        if last_label is None or np.linalg.norm(F[i, :2] - last_label) > 0.04 * max(span, 1.0):
+            ax3.annotate(f"{t[i]:.0f}s", F[i, :2], xytext=(4, 4), textcoords="offset points",
+                         fontsize=7, color="0.3", zorder=4)
+            last_label = F[i, :2]
+
+    # inizio di ogni perdita: croce sulla posizione del follower
+    lost = np.flatnonzero(out & ~np.r_[False, out[:-1]])
+    ax3.plot(F[lost, 0], F[lost, 1], "x", color="tab:red", ms=7, mew=1.8, zorder=4,
+             label="Leader perso")
+    for P, c in ((L, "tab:blue"), (F, "tab:orange")):
+        ax3.plot(*P[0, :2], "o", color=c, ms=8, mec="k", mew=0.8, zorder=5)
+        ax3.plot(*P[-1, :2], "s", color=c, ms=8, mec="k", mew=0.8, zorder=5)
+    ax3.plot([], [], "o", color="0.5", ms=7, mec="k", mew=0.8, label="start  (□ = fine)")
+    ax3.add_patch(Wedge((0, 0), 0, 0, 0, color="tab:red", alpha=0.25,
+                        label=f"FOV camera ogni {args.mark_every:g} s"))
     ax3.set_aspect("equal", adjustable="datalim")
     ax3.set_xlabel("x [m]"); ax3.set_ylabel("y [m]")
-    ax3.set_title("Vista dall'alto\n(○ start, □ fine, grigio ogni ~2 s, heading ogni ~1 s)", fontsize=10)
+    ax3.set_title("Vista dall'alto", fontsize=11)
     ax3.grid(alpha=0.3)
-    ax3.legend(loc="best", fontsize=8)
+    ax3.legend(loc="upper center", bbox_to_anchor=(0.5, -0.08), ncol=2, fontsize=8, frameon=False)
 
-    fig.legend(handles=[Patch(color="tab:red", alpha=0.3, label="Leader fuori FOV (camera " + ("gimbal, solo yaw" if gimbal else "rigida, roll/pitch/yaw") + ")")],
-               loc="lower center", fontsize=9)
-    fig.tight_layout(rect=[0, 0.04, 1, 1])
+    fig.tight_layout()
     fig.savefig(args.out, dpi=150)
     print(f"Plot salvato in: {args.out}")
 

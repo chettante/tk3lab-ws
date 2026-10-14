@@ -53,12 +53,17 @@ def _include_pose(world, name):
 
 
 def sync_spawn_yaw(path, leader='qr4_leading', follower='qr4_following'):
-    """Yaw di spawn del follower = bearing verso il leader − yaw di montaggio della camera."""
+    """Posizione di spawn del follower da follower_spawn_mode (near/far) e
+    yaw = bearing verso il leader − yaw di montaggio della camera."""
     with open(path) as f:
         world = f.read()
     pl = [float(v) for v in _include_pose(world, leader).group(2).split()]
     mf = _include_pose(world, follower)
     pf = [float(v) for v in mf.group(2).split()]
+    mode = CONFIG['follower_spawn_mode']
+    if mode not in ('near', 'far'):
+        sys.exit(f"follower_spawn_mode deve essere 'near' o 'far', non {mode!r}")
+    pf[0], pf[1] = CONFIG[f'follower_spawn_{mode}_xy']
     bearing = math.atan2(pl[1] - pf[1], pl[0] - pf[0])
     yaw = math.atan2(math.sin(bearing - math.radians(CONFIG['camera_yaw_deg'])),
                      math.cos(bearing - math.radians(CONFIG['camera_yaw_deg'])))
@@ -67,7 +72,8 @@ def sync_spawn_yaw(path, leader='qr4_leading', follower='qr4_following'):
     if new != world:
         with open(path, 'w') as f:
             f.write(new)
-    print(f"World {path}: spawn {follower} yaw {math.degrees(yaw):.1f}° "
+    print(f"World {path}: spawn {follower} ({mode}) in ({pf[0]:g}, {pf[1]:g}), "
+          f"yaw {math.degrees(yaw):.1f}° "
           f"(bearing verso {leader} {math.degrees(bearing):.1f}° − camera {CONFIG['camera_yaw_deg']:g}°)")
 
 
