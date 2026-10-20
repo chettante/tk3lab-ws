@@ -36,6 +36,7 @@ from final_project.state_machine.state_tracking import TrackingState
 from final_project.state_machine.state_searching import SearchingState
 from final_project.state_machine.state_exploring import ExploringState
 from final_project.components.trajectory_handler import TrajectoryHandler
+from final_project.components.leader_trajectories import build_leader_trajectory
 from final_project.config import CONFIG, config_path
 from final_project.components.Research import LeaderSearchManeuver
 from final_project.graphics.trajectory_plotter import plot_trajectory
@@ -185,43 +186,56 @@ def main():
     maneuver_l.set_velocity_limit(CONFIG['leader_max_velocity'], CONFIG['max_yaw_rate'])
     maneuver_l.set_acceleration_limit(CONFIG['leader_max_acc'], CONFIG['max_yaw_acc'])
     maneuver_f.set_velocity_limit(CONFIG['follower_max_velocity'], CONFIG['max_yaw_rate'])
-    logger.info(f"  Leader: speed {CONFIG['leader_speed']} m/s, limits "
-                f"{CONFIG['leader_max_velocity']} m/s, {CONFIG['leader_max_acc']} m/s²")
-    logger.info(f"  Follower: max velocity {CONFIG['follower_max_velocity']} m/s, tracking acc "
-                f"{tracking_acc:.2f} m/s² (tilt {CONFIG['tracking_max_tilt_deg']}°)")
-    logger.info(f"  Max yaw rate (both): {CONFIG['max_yaw_rate']} rad/s")
-
-    # consistency of the limits
-    if CONFIG['leader_speed'] > CONFIG['leader_max_velocity']:
-        logger.warning(f"  leader_speed={CONFIG['leader_speed']} m/s > leader_max_velocity="
-                       f"{CONFIG['leader_max_velocity']} m/s: the leader will not follow the trajectory")
-    if CONFIG['follower_max_velocity'] < 1.3 * CONFIG['leader_speed']:
-        logger.warning(f"  follower_max_velocity={CONFIG['follower_max_velocity']} m/s < 1.3·leader_speed: "
-                       "the follower has little margin to catch up with the leader")
-    if tracking_acc < 1.2 * CONFIG['leader_max_acc']:
-        logger.warning(f"  tracking acceleration {tracking_acc:.2f} m/s² < 1.2·leader_max_acc: "
-                       "the follower accelerates less than the leader (increase tracking_max_tilt_deg)")
-    if CONFIG['tracking_max_tilt_deg'] > CONFIG['fov_half_angle_v_deg'] / 2:
-        logger.warning(f"  tracking_max_tilt_deg={CONFIG['tracking_max_tilt_deg']}° > half of the vertical "
-                       "FOV: the tilt can push the leader out of the frame")
+    maneuver_f.set_acceleration_limit(CONFIG['follower_max_acc'], CONFIG['max_yaw_acc'])
 
     PERIOD = CONFIG['control_loop_period']
 
+    # select the trajectory for the leader (th = None: random waypoints queued after takeoff)
+    kind = CONFIG['leader_trajectory']
+    p0 = np.array(CONFIG['leader_start_pos'], dtype=float)
+    if kind == 'otto':
+        th = TrajectoryHandler.from_speed(
+            CONFIG['leader_speed'],
+            period=PERIOD,
+            A=CONFIG['traj_A'],
+            B=CONFIG['traj_B'],
+            H=CONFIG['traj_H'],
+            P0=p0,                          # the figure-8 starts where the leader takes off
+            position_reader=optitrack_reader,
+            leader_body_name=CONFIG['leader_body'],
+        )
+        leader_peak_v = float(np.linalg.norm(th._vel, axis=0).max())
+        leader_peak_a = float(np.linalg.norm(th._acc, axis=0).max())
+    elif kind == 'random':
+        th = None
+        leader_peak_v, leader_peak_a = CONFIG['leader_max_velocity'], CONFIG['leader_max_acc']
+    else:
+        th = build_leader_trajectory(kind, p0, PERIOD, CONFIG)
+        leader_peak_v, leader_peak_a = th.peak_speed, th.peak_acc
 
+    tilt = CONFIG['tracking_max_tilt_deg']
+    logger.info(f"  Leader: trajectory '{kind}', peak {leader_peak_v:.1f} m/s, {leader_peak_a:.1f} m/s² "
+                f"(limits {CONFIG['leader_max_velocity']} m/s, {CONFIG['leader_max_acc']} m/s²)")
+    logger.info(f"  Follower: limits {CONFIG['follower_max_velocity']} m/s, {CONFIG['follower_max_acc']} m/s², "
+                f"tracking acc {tracking_acc:.2f} m/s² (tilt {tilt}°)")
+    logger.info(f"  Max yaw rate (both): {CONFIG['max_yaw_rate']} rad/s")
 
-    # select the trajectory for the leader
-    th = TrajectoryHandler.from_speed(
-        CONFIG['leader_speed'],
-        period=PERIOD,
-        A=CONFIG['traj_A'],
-        B=CONFIG['traj_B'],
-        H=CONFIG['traj_H'],
-        P0=np.array(CONFIG['leader_start_pos'], dtype=float),   # the figure-8 starts where the leader takes off
-        position_reader=optitrack_reader,
-        leader_body_name=CONFIG['leader_body'],
-    )
-
-    random_traj = CONFIG['leader_random_trajectory']
+    # consistency of the limits, with the velocity/acceleration the leader actually reaches
+    if kind != 'random' and (leader_peak_v > CONFIG['leader_max_velocity']
+                             or leader_peak_a > CONFIG['leader_max_acc']):
+        logger.warning("  the trajectory exceeds the leader maneuver limits: "
+                       "the leader will not follow it exactly")
+    if CONFIG['follower_max_velocity'] < 1.3 * leader_peak_v:
+        logger.warning(f"  follower_max_velocity={CONFIG['follower_max_velocity']} m/s < 1.3·leader peak "
+                       f"velocity ({leader_peak_v:.1f} m/s): little margin to catch up with the leader")
+    if tracking_acc < leader_peak_a:
+        logger.warning(f"  tracking acceleration {tracking_acc:.2f} m/s² < leader peak acceleration "
+                       f"{leader_peak_a:.1f} m/s²: the leader can pull away during its maneuvers")
+    # rigid camera: tilting by `tilt` moves a leader at the same altitude by `tilt` in the image
+    if tilt >= CONFIG['tracking_vprio_start_deg']:
+        logger.warning(f"  tracking_max_tilt_deg={tilt}° >= tracking_vprio_start_deg="
+                       f"{CONFIG['tracking_vprio_start_deg']}°: at full acceleration the approach is cut "
+                       "even with the leader at the same altitude")
 
     pom_l.log_state(config_path('pom_leader_log'))
     pom_f.log_state(config_path('pom_follower_log'))
@@ -244,37 +258,35 @@ def main():
         time.sleep(PERIOD)
     time.sleep(CONFIG['leader_takeoff_hold'])
 
-    if random_traj:
+    if th is None:
         # queue the waypoints in maneuver_l: maneuver executes them, without commands from the loop
-        traj_time = random_trajectory(
-            CONFIG['random_traj_points'], start=CONFIG['leader_start_pos'],
-            speed=CONFIG['leader_speed'], z_range=CONFIG['random_traj_z_range'],
-            xy_range=CONFIG['random_traj_xy_range'],
+        traj_time, final_point = random_trajectory(
+            CONFIG['random_traj_points'], start=p0,
+            v_max=CONFIG['leader_max_velocity'], a_max=CONFIG['leader_max_acc'],
+            z_range=CONFIG['random_traj_z_range'], xy_range=CONFIG['random_traj_xy_range'],
+            seed=CONFIG['random_seed'],
         )
     else:
         traj_time = th.duration
 
-    # the loop lasts as long as the leader trajectory + a final tail
-    max_loops = int(np.ceil((traj_time + CONFIG['traj_tail_time']) / PERIOD))
+    # the loop ends traj_tail_time after the leader trajectory: for the random waypoints
+    # when the leader reaches the last one (twice the estimated duration at most)
+    tail_loops = int(round(CONFIG['traj_tail_time'] / PERIOD))
+    max_loops = int(np.ceil((traj_time if th is not None else 2 * traj_time) / PERIOD)) + tail_loops
+    end_loop = None
 
     # ===== MAIN CONTROL LOOP =====
     logger.info("[*] Starting main control loop")
     logger.info(f"     Period: {PERIOD}s ({1/PERIOD:.0f} Hz)")
-    if random_traj:
-        logger.info(f"     Leader trajectory: RANDOM, {CONFIG['random_traj_points']} waypoints "
-                    f"({traj_time:.0f}s at ~{CONFIG['leader_speed']} m/s), "
-                    f"tail {CONFIG['traj_tail_time']}s -> {max_loops} loops")
-    else:
-        logger.info(f"     Leader trajectory: figure-8 {traj_time:.1f}s "
-                    f"(cruise {th.cruise_speed:.2f} m/s), tail {CONFIG['traj_tail_time']}s "
-                    f"-> {max_loops} loops")
+    logger.info(f"     Leader trajectory: '{kind}', about {traj_time:.0f}s, "
+                f"tail {CONFIG['traj_tail_time']}s, at most {max_loops} loops")
     logger.info("=" * 80)
     next_t = time.monotonic()
 
     try:
-        while loop_count < max_loops:
-            # Update the leader trajectory (figure-8 only)
-            if not random_traj:
+        while loop_count < max_loops and (end_loop is None or loop_count < end_loop):
+            # Update the leader trajectory (random waypoints: already queued in maneuver)
+            if th is not None:
                 th.update_trajectory(maneuver_l)
 
             # Run one state machine update cycle
@@ -283,6 +295,17 @@ def main():
             follower_pos, _ = optitrack_reader(CONFIG['follower_body'])
             if follower_pos is not None:
                 follower_path.append(tuple(np.asarray(follower_pos, dtype=float)))
+
+            # end of the leader trajectory: start the final tail
+            if end_loop is None:
+                if th is not None:
+                    finished = th.is_complete
+                else:
+                    leader_pos, _ = optitrack_reader(CONFIG['leader_body'])
+                    finished = (leader_pos is not None and np.linalg.norm(
+                        np.asarray(leader_pos) - final_point) < CONFIG['leader_takeoff_tol'])
+                if finished:
+                    end_loop = loop_count + tail_loops
 
             # Log the state every N cycles
             if loop_count % 100 == 0:

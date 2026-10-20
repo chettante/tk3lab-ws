@@ -1,5 +1,4 @@
 import genomix
-from genomix.event import GenoMError
 import os
 import random
 import numpy as np
@@ -206,62 +205,39 @@ def stop():
 
 
 
-def random_trajectory(n_points, start, speed, z_range=(2.0, 6.0), xy_range=10.0,
-                      maneuver=None, min_segment=2.0, max_retries=8):
+def random_trajectory(n_points, start, v_max, a_max, z_range=(2.0, 6.0), xy_range=10.0,
+                      seed=None, maneuver=None):
   """
   Queues in maneuver (default maneuver_l) n_points random waypoints plus a final
-  point at rest, all with altitude in z_range (the leader never goes below z_min).
-  - duration of each segment = distance / speed (at least min_segment s):
-    average velocity ≈ speed, regardless of how far apart the points are
-  - velocity when passing a waypoint = speed along the Catmull-Rom tangent
-    (previous → next direction), so the motion is smooth; 0 on the final point
-  If maneuver rejects a segment because of the limits (e_limits), its duration is extended.
-  Returns the total duration [s].
+  point, all with altitude in z_range (the leader never goes below z_min).
+  Every waypoint has duration 0 and zero velocity: the leader flies each segment as
+  fast as its maneuver limits allow (v_max, a_max) and stops on every waypoint.
+  The same seed gives the same waypoints.
+  Returns (estimated duration [s], final point).
   """
   maneuver = maneuver_l if maneuver is None else maneuver
+  rng = random.Random(seed)
   z_min, z_max = z_range
   pts = [np.asarray(start, dtype=float)]
   for _ in range(n_points):
-    pts.append(np.array([random.uniform(-xy_range, xy_range),
-                         random.uniform(-xy_range, xy_range),
-                         random.uniform(z_min, z_max)]))
-  pts.append(np.array([random.uniform(-xy_range, xy_range),
-                       random.uniform(-xy_range, xy_range), z_min]))
+    pts.append(np.array([rng.uniform(-xy_range, xy_range),
+                         rng.uniform(-xy_range, xy_range),
+                         rng.uniform(z_min, z_max)]))
+  pts.append(np.array([rng.uniform(-xy_range, xy_range),
+                       rng.uniform(-xy_range, xy_range), z_min]))
 
   total = 0.0
   for i in range(1, len(pts)):
-    duration = max(min_segment, np.linalg.norm(pts[i] - pts[i - 1]) / speed)
-    if i < len(pts) - 1:
-      tangent = pts[i + 1] - pts[i - 1]
-      v = speed * tangent / max(np.linalg.norm(tangent), 1e-6)
-    else:
-      v = np.zeros(3)                       # final point: at rest
-    # maneuver rejects (e_limits) a segment that, with this duration, would violate the
-    # leader velocity/acceleration limits: retry with a longer one, at worst duration=0
-    # (as fast as possible within the limits)
-    for _ in range(max_retries):
-      try:
-        maneuver.waypoint({
-          'x': pts[i][0], 'y': pts[i][1], 'z': pts[i][2], 'yaw': 0,
-          'duration': 0,
-          'vx': 0, 'vy': 0, 'vz': 0, 'wz': 0,
-          'ax': 0, 'ay': 0, 'az': 0
-        })
-        break
-      except GenoMError as e:
-        if 'e_limits' not in str(e):
-          raise
-        duration *= 1.3
-    else:
-      maneuver.waypoint({
-        'x': pts[i][0], 'y': pts[i][1], 'z': pts[i][2], 'yaw': 0,
-        'duration': 0,
-        'vx': v[0], 'vy': v[1], 'vz': v[2], 'wz': 0,
-        'ax': 0, 'ay': 0, 'az': 0
-      })
-      duration = np.linalg.norm(pts[i] - pts[i - 1]) / speed   # estimate for max_loops
-    total += duration
-  return total
+    maneuver.waypoint({
+      'x': pts[i][0], 'y': pts[i][1], 'z': pts[i][2], 'yaw': 0,
+      'duration': 0,
+      'vx': 0, 'vy': 0, 'vz': 0, 'wz': 0,
+      'ax': 0, 'ay': 0, 'az': 0
+    })
+    # estimate with a trapezoidal profile (maneuver is smoother, so a bit slower)
+    d = np.linalg.norm(pts[i] - pts[i - 1])
+    total += d / v_max + v_max / a_max if d > v_max**2 / a_max else 2 * np.sqrt(d / a_max)
+  return total, pts[-1]
 
 
 def _quat_to_yaw(quat):

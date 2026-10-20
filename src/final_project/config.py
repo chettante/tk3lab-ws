@@ -10,6 +10,7 @@ Paths:
   - '~' is expanded; missing folders are created
 """
 
+import json
 import os
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -35,14 +36,18 @@ CONFIG = {
     # and max_yaw_rate (nhfc section).
     'tracking_kp_xy': 0.3,
     'tracking_kp_z': 0.6,
-    'tracking_follow_distance': 3.0,  # m, horizontal distance from the leader (along the bearing);
-                                      # larger = the bearing turns more slowly when the leader curves
+    # m, horizontal distance from the leader (along the bearing). Half of fov_max_range: same margin
+    # when the leader accelerates away (distance grows) and when it brakes (distance shrinks).
+    # Larger = the bearing turns more slowly (yaw limit v_lat <= max_yaw_rate·d) and a larger
+    # height difference fits in the vertical FOV (dz <= d·tan(fov_half_angle_v_deg))
+    'tracking_follow_distance': 5.0,
     'tracking_kp_angle': 1.5,       # 1/s: steady-state yaw lag ≈ bearing rate / kp_angle
     # tracking acceleration as a tilt budget: the camera is rigid, so every degree of
     # follower tilt moves the leader by one degree in the image (at any distance).
     # The main computes a = g·tan(tilt) and uses it both for the command rate limiter
-    # and as the ax, ay, az passed to maneuver.velocity(). 6° ≈ 1.0 m/s², 10° ≈ 1.7 m/s², 15° ≈ 2.6 m/s²
-    'tracking_max_tilt_deg': 10.0,
+    # and as the ax, ay, az passed to maneuver.velocity(). 10° ≈ 1.7 m/s², 15° ≈ 2.6 m/s², 20° ≈ 3.6 m/s².
+    # Budget: tilt + elevation of the leader (atan(dz/d)) should stay below tracking_vprio_start_deg
+    'tracking_max_tilt_deg': 15.0,
     # yaw priority: the position (xy) correction decreases linearly from 100% at
     # |yaw error| = yaw_priority_start down to 0% at the FOV edge (fov_half_angle_h_deg)
     'tracking_yaw_priority_start_deg': 25.0,
@@ -61,7 +66,9 @@ CONFIG = {
     'explore_bounds': ((-10.0, 10.0), (-10.0, 10.0), (5.0, 15.0)),
     'explore_ring_clearance': 1.0,
     'explore_top_clearance': 1.0,
-    'out_of_fov_timeout': 2.0,      # grace period with prediction
+    # s, grace period with prediction before SEARCHING. The prediction error grows as ½·a_leader·t²:
+    # with a leader up to ~5 m/s² it stays inside the FOV half-width at follow distance (~4.7 m) for ~1.4 s
+    'out_of_fov_timeout': 1.5,
 
     # ------------------------------------------------------------------
     # Control loop and terminal logging
@@ -81,17 +88,21 @@ CONFIG = {
         'Kvxy': 6, 'Kvz': 6, 'Kwxy': 1, 'Kwz': 0.1,
         'Kixy': 0, 'Kiz': 0,
     },
-    # drone limits (maneuver). The leader cruises at leader_speed (Leader section);
-    # the follower must be able to overtake it: follower_max_velocity ≳ 1.3·leader_speed
-    'leader_max_velocity': 50.0,     # m/s, leader maneuver limit (≥ leader_speed)
-    'leader_max_acc': 50.0,          # m/s², leader maneuver limit
-    'follower_max_velocity': 50.0,   # m/s, follower maneuver limit + tracking/exploring/search saturation
+    # FOLLOWER: physical limits of a good camera quadrotor, kept FIXED in every test.
+    # With the rigid camera the tracking uses only part of them (tracking_max_tilt_deg)
+    'follower_max_velocity': 15.0,   # m/s, follower maneuver limit + tracking/exploring/search saturation
+    'follower_max_acc': 6.0,         # m/s² (≈ 31° of tilt), follower maneuver limit
+    # LEADER: maneuver limits. On the random waypoints the leader flies at these limits
+    # (stop at each waypoint), so they set its aggressiveness: they are the benchmark variables.
+    # The follower must be faster: follower_max_velocity ≳ 1.3·leader peak velocity
+    'leader_max_velocity': 8.0,      # m/s
+    'leader_max_acc': 3.0,           # m/s²
     'max_yaw_rate': 2.0,            # rad/s, both drones
     'max_yaw_acc': 2.0,             # rad/s², leader angular acceleration limit
-    # flight volume for the maneuver planner: 220 m x 220 m x 50 m
+    # flight volume for the maneuver planner: 400 m x 400 m x 50 m (room for the straight line at 10 m/s)
     'maneuver_bounds': {
-        'xmin': -110, 'xmax': 110,
-        'ymin': -110, 'ymax': 110,
+        'xmin': -200, 'xmax': 200,
+        'ymin': -200, 'ymax': 200,
         'zmin': 0,   'zmax': 50,
         'yawmin': -3.14, 'yawmax': 3.14,
     },
@@ -118,19 +129,33 @@ CONFIG = {
     'leader_start_yaw': 0.0,                # rad
     'follower_takeoff_z': 1.0,              # m, the follower takes off vertically above its spawn together with the leader
     'leader_takeoff_tol': 0.15,             # m, distance from the takeoff target (both drones)
+                                            # and from the last random waypoint (end of the trajectory)
     'leader_takeoff_timeout': 5.0,         # s, after this the run starts anyway
-    'leader_takeoff_hold': 2.0,             # s, hover on leader_start_pos before the trajectory
+    'leader_takeoff_hold': 1.0,             # s, hover on leader_start_pos before the trajectory
 
-    # leader cruise speed, both on the figure-8 and on the random waypoints:
-    # the trajectory duration is derived from it
-    'leader_speed': 40.0,                    # m/s
+    # leader trajectory:
+    #   'otto'   figure-8 (traj_A/B/H)              'random' random waypoints, stop at each one
+    #   'line'   straight line along +x             'circle' circle tangent to +x at the start
+    #   'vstep'  climb by vstep_dz and back down    'hover'  stays still for hover_time
+    'leader_trajectory': 'random',
+    # cruise speed of the parametric trajectories (otto, line, circle; vertical speed for vstep).
+    # Not used by 'random', which flies at leader_max_velocity / leader_max_acc
+    'leader_speed': 5.0,                    # m/s
+    'leader_traj_acc': 2.0,                 # m/s², peak acceleration of the ramps (line, circle, vstep)
 
-    'leader_random_trajectory': True,       # TEMP: random waypoints (random_trajectory) instead of the figure-8
-    'random_traj_points': 100,               # number of random waypoints (+ one final point at rest)
-    'random_traj_z_range': (5.0, 15.0),      # m, waypoint altitudes (inside explore_bounds)
-    'random_traj_xy_range': 100.0,           # m, x and y drawn in [-range, +range]
+    'random_traj_points': 20,               # number of random waypoints (+ one final point at rest)
+    'random_traj_z_range': (5.0, 10.0),     # m, waypoint altitudes (inside explore_bounds)
+    'random_traj_xy_range': 30.0,           # m, x and y drawn in [-range, +range]
+    'random_seed': 1,                       # same seed = same waypoints (comparable runs)
 
-    'traj_tail_time': 15.0,                 # s, the main keeps running for this long after the trajectory ends
+    'line_length': 150.0,                   # m, total length of 'line' (ramps included)
+    'circle_radius': 10.0,                  # m
+    'circle_laps': 2.0,
+    'vstep_dz': 2.0,                        # m, height of the step ('vstep')
+    'vstep_hold': 4.0,                      # s, hover before, between and after the two vertical moves
+    'hover_time': 15.0,                     # s, duration of 'hover'
+
+    'traj_tail_time': 5.0,                  # s, the main keeps running for this long after the trajectory ends
     'traj_A': 5.0,                          # amplitude along y [m]
     'traj_B': 5.0,                          # amplitude along x (semi-axis = B/2) [m]
     'traj_H': 5.0,                          # maximum altitude above P0 [m]
@@ -142,7 +167,7 @@ CONFIG = {
     # p_pred = p_last + v_last·(t_lost + T): turns to center it, moves closer
     # if it is beyond approach_dist, goes to its predicted altitude
     'search_T_rec': 0.2,            # s, minimum recovery duration and prediction horizon
-    'search_approach_dist': 3.0,    # m, horizontal distance from the predicted leader (< fov_max_range)
+    'search_approach_dist': 5.0,    # m, horizontal distance from the predicted leader (= tracking_follow_distance)
     'search_z_min': 5.5,            # m, altitude limits during recovery
     'search_z_max': 15.0,
     # global scan: home, climb by delta_z_global while spinning, descend while spinning
@@ -175,6 +200,13 @@ CONFIG = {
     # folder for the internal logs of the GenoM3 components (pom/rotorcraft/nhfc/maneuver/optitrack)
     'genom_log_dir': '/tmp',
 }
+
+
+# Benchmark: a JSON file named by DRONE_CHASE_OVERRIDES replaces some of the values above
+# (written by benchmark/run_benchmark.py; JSON lists replace tuples)
+if os.environ.get('DRONE_CHASE_OVERRIDES'):
+    with open(os.environ['DRONE_CHASE_OVERRIDES']) as _f:
+        CONFIG.update(json.load(_f))
 
 
 # ============================================================================
