@@ -130,7 +130,7 @@ class TrackingController:
     """
 
     def __init__(self, follower, velocity_estimator=None,
-                 kp_xy=0.3, kp_z=0.6, follow_distance=1.5, cmd_acc_max=1.0, lateral_acc_max=None,
+                 kp_xy=0.3, kp_z=0.6, follow_distance=1.5, cmd_acc_max=1.0,
                  yaw_priority_start_deg=25.0, yaw_priority_end_deg=45.0,
                  vprio_start_deg=18.0, vprio_end_deg=29.0,
                  max_velocity=2.5, *, yaw_rate_max):
@@ -140,9 +140,7 @@ class TrackingController:
         # vertical priority: above start the in-plane approach decreases, at end it is zero
         self.v_prio = np.radians([vprio_start_deg, vprio_end_deg])
         self.follow_distance = follow_distance   # m, horizontal distance from the leader
-        self.cmd_acc_max = cmd_acc_max           # m/s², max change of the command along the line of sight
-        # m/s², max change across the line of sight and in z (default: same as along)
-        self.lateral_acc_max = cmd_acc_max if lateral_acc_max is None else lateral_acc_max
+        self.cmd_acc_max = cmd_acc_max           # m/s², max change of the velocity command
         self.max_velocity = max_velocity         # m/s, drone limit (same as the leader)
         self.velocity_estimator = velocity_estimator or VelocityEstimator()
         self.kp = np.array([kp_xy, kp_xy, kp_z])
@@ -198,18 +196,12 @@ class TrackingController:
 
         v_cmd = leader_vel + v_corr             # full FF (gain = 1)
 
-        # rate limiter, split along / across the horizontal line of sight u. Along it the drone
-        # pitches and the leader moves vertically in the image: max cmd_acc_max*dt per tick.
-        # Across it the drone rolls around the optical axis (the image rotates around the
-        # centered leader) and in z it only changes thrust: max lateral_acc_max*dt per tick
+        # rate limiter: the command cannot change by more than cmd_acc_max*dt per tick
         dv = v_cmd - self.last_cmd
-        along = (dv[:2] @ u) * np.array([u[0], u[1], 0.0])
-        across = dv - along
-        for part, a_max in ((along, self.cmd_acc_max), (across, self.lateral_acc_max)):
-            n = np.linalg.norm(part)
-            if n > a_max * dt:
-                part *= a_max * dt / n
-        v_cmd = self.last_cmd + along + across
+        dv_max = self.cmd_acc_max * dt
+        n_dv = np.linalg.norm(dv)
+        if n_dv > dv_max:
+            v_cmd = self.last_cmd + dv * (dv_max / n_dv)
 
         # drone velocity limit (same as the leader)
         n = np.linalg.norm(v_cmd)
