@@ -1,12 +1,12 @@
 """
-Confronta la velocità stimata (velocity_log.txt) con la velocità "vera"
-misurata dal pom (pom.log), limitandosi all'intervallo di tempo comune
-ai due file, e produce un'unica immagine con 3 subplot (Vx, Vy, Vz).
+Compares the estimated velocity (velocity_log.txt) with the "true" velocity
+measured by pom (pom.log), restricted to the time interval common to the
+two files, and produces a single image with 3 subplots (Vx, Vy, Vz).
  
-Uso:
-    python3 compare_velocity.py [pom_log_path] [velocity_log_path] [output_path]
+Usage:
+    python3 velocity_plotter.py [pom_log_path] [velocity_log_path] [output_path]
  
-Se non vengono passati argomenti, usa i percorsi definiti in final_project/config.py
+If no arguments are given, it uses the paths defined in final_project/config.py
 (pom_leader_log, velocity_log, plot_velocity).
 """
  
@@ -15,7 +15,7 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 
-# permette l'esecuzione diretta (python3 velocity_plotter.py) leggendo final_project/config.py
+# allows direct execution (python3 velocity_plotter.py) reading final_project/config.py
 _SRC_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _SRC_ROOT not in sys.path:
     sys.path.insert(0, _SRC_ROOT)
@@ -24,11 +24,11 @@ from final_project.config import config_path
  
 def load_pom_log(path):
     """
-    Parsa il file pom.log.
-    Formato: righe di commento che iniziano con '#', righe vuote da ignorare,
-    header con i nomi colonna preceduto da '#', poi righe di dati separate da spazi.
-    Colonne di interesse (in base all'header):
-        ts vx vy vz  -> indici 0, 13, 14, 15
+    Parses the pom.log file.
+    Format: comment lines starting with '#', empty lines to skip,
+    header with the column names preceded by '#', then space-separated data lines.
+    Columns of interest (based on the header):
+        ts vx vy vz  -> indices 0, 13, 14, 15
     """
     timestamps = []
     vx, vy, vz = [], [], []
@@ -39,7 +39,7 @@ def load_pom_log(path):
             if not line or line.startswith("#"):
                 continue
             parts = line.split()
-            # riga di dati valida: deve avere almeno 16 colonne (indice 15 = vz)
+            # valid data line: must have at least 16 columns (index 15 = vz)
             if len(parts) < 16:
                 continue
             try:
@@ -59,8 +59,8 @@ def load_pom_log(path):
  
 def load_velocity_log(path):
     """
-    Parsa il file velocity_log.txt.
-    Formato: timestamp, vx, vy, vz (separati da virgola)
+    Parses the velocity_log.txt file.
+    Format: timestamp, vx, vy, vz (comma separated)
     """
     timestamps, vx, vy, vz = [], [], [], []
  
@@ -85,7 +85,7 @@ def load_velocity_log(path):
  
  
 def clip_to_common_interval(t_a, t_b):
-    """Ritorna (t_start, t_end) dell'intervallo di tempo comune a due serie temporali."""
+    """Returns (t_start, t_end) of the time interval common to two time series."""
     t_start = max(t_a.min(), t_b.min())
     t_end = min(t_a.max(), t_b.max())
     return t_start, t_end
@@ -93,16 +93,16 @@ def clip_to_common_interval(t_a, t_b):
  
 def nearest_match(t_ref, t_pom, vx_pom, vy_pom, vz_pom):
     """
-    Per ogni timestamp in t_ref (quello che logga meno frequentemente),
-    trova il campione pom più vicino nel tempo e ne prende il valore.
-    t_pom deve essere ordinato crescente (i log lo sono già per costruzione).
+    For each timestamp in t_ref (the one that logs less frequently),
+    finds the closest pom sample in time and takes its value.
+    t_pom must be sorted in increasing order (the logs already are by construction).
     """
     idx = np.searchsorted(t_pom, t_ref)
     idx = np.clip(idx, 1, len(t_pom) - 1)
  
     left = idx - 1
     right = idx
-    # scegli, tra il campione precedente e quello successivo, il più vicino
+    # pick the closest between the previous and the next sample
     use_left = np.abs(t_pom[left] - t_ref) <= np.abs(t_pom[right] - t_ref)
     best_idx = np.where(use_left, left, right)
  
@@ -115,33 +115,33 @@ def main():
     vel_path = sys.argv[2] if len(sys.argv) > 2 else config_path('velocity_log')
     out_path = sys.argv[3] if len(sys.argv) > 3 else config_path('plot_velocity')
  
-    # Carica i due file
+    # Load the two files
     t_pom, vx_pom, vy_pom, vz_pom = load_pom_log(pom_path)
     t_est, vx_est, vy_est, vz_est = load_velocity_log(vel_path)
  
     if len(t_pom) == 0:
-        raise RuntimeError(f"Nessun dato valido trovato in {pom_path}")
+        raise RuntimeError(f"No valid data found in {pom_path}")
     if len(t_est) == 0:
-        raise RuntimeError(f"Nessun dato valido trovato in {vel_path}")
+        raise RuntimeError(f"No valid data found in {vel_path}")
  
-    # Intervallo di tempo comune
+    # Common time interval
     t_start, t_end = clip_to_common_interval(t_pom, t_est)
-    print(f"Intervallo comune: [{t_start:.3f}, {t_end:.3f}]  (durata: {t_end - t_start:.2f} s)")
+    print(f"Common interval: [{t_start:.3f}, {t_end:.3f}]  (duration: {t_end - t_start:.2f} s)")
  
     mask_est = (t_est >= t_start) & (t_est <= t_end)
     t_est_c, vx_est_c, vy_est_c, vz_est_c = (t_est[mask_est], vx_est[mask_est],
                                               vy_est[mask_est], vz_est[mask_est])
  
-    # Per ogni timestamp di velocity_log (meno frequente), prendo il campione
-    # pom più vicino nel tempo, invece di tenere tutti i punti pom
+    # For each velocity_log timestamp (less frequent), take the closest
+    # pom sample in time, instead of keeping all the pom points
     vx_pom_c, vy_pom_c, vz_pom_c = nearest_match(t_est_c, t_pom, vx_pom, vy_pom, vz_pom)
  
-    # Tempo relativo (parte da 0) per leggibilità sull'asse x
+    # Relative time (starting at 0) for readability on the x axis
     t0 = t_start
-    t_pom_rel = t_est_c - t0   # stessi istanti di velocity_log
+    t_pom_rel = t_est_c - t0   # same instants as velocity_log
     t_est_rel = t_est_c - t0
  
-    # Plot: 3 subplot verticali, uno per componente
+    # Plot: 3 vertical subplots, one per component
     fig, axes = plt.subplots(3, 1, figsize=(10, 10), sharex=True)
  
     components = [
@@ -151,19 +151,19 @@ def main():
     ]
  
     for label, pom_data, est_data, ax in components:
-        ax.plot(t_pom_rel, pom_data, label="pom (verità)", color="tab:green", linewidth=1.5)
-        ax.plot(t_est_rel, est_data, label="stima (velocity_log)", color="tab:red",
+        ax.plot(t_pom_rel, pom_data, label="pom (ground truth)", color="tab:green", linewidth=1.5)
+        ax.plot(t_est_rel, est_data, label="estimate (velocity_log)", color="tab:red",
                 linestyle="none", marker="o", markersize=3)
         ax.set_ylabel(f"{label} [m/s]")
         ax.grid(True, alpha=0.3)
         ax.legend(loc="upper right")
  
-    axes[-1].set_xlabel("Tempo [s] (relativo all'inizio dell'intervallo comune)")
-    fig.suptitle("Confronto velocità: pom (verità) vs stima (velocity_log)", fontsize=14)
+    axes[-1].set_xlabel("Time [s] (relative to the start of the common interval)")
+    fig.suptitle("Velocity comparison: pom (ground truth) vs estimate (velocity_log)", fontsize=14)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
  
     fig.savefig(out_path, dpi=150)
-    print(f"Plot salvato in: {out_path}")
+    print(f"Plot saved to: {out_path}")
  
  
 if __name__ == "__main__":

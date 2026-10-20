@@ -1,6 +1,6 @@
 """
-Helper per leggere posizioni e orientamenti da OptiTrack in modo robusto.
-Astrae i dettagli dell'API di genomix.
+Helper to read positions and orientations from OptiTrack robustly.
+Hides the details of the genomix API.
 """
 
 import logging
@@ -11,42 +11,42 @@ logger = logging.getLogger("OptiTrackHelper")
 
 class OptiTrackHelper:
     """
-    Wrapper intorno all'API di OptiTrack per leggere posizioni e quaternioni.
+    Wrapper around the OptiTrack API to read positions and quaternions.
     """
 
     def __init__(self, optitrack_component):
         """
         Args:
-            optitrack_component: componente 'optitrack' caricato da genomix
+            optitrack_component: 'optitrack' component loaded by genomix
         """
         self.optitrack = optitrack_component
 
     def read_body(self, body_name: str):
         """
-        Legge posizione e orientamento di un body da OptiTrack.
-        
+        Reads position and orientation of a body from OptiTrack.
+
         Args:
-            body_name: nome del body ('QR4_leading', 'QR4_following', etc.)
-        
+            body_name: body name ('QR4_leading', 'QR4_following', etc.)
+
         Returns:
             (position, quaternion) tuple
             - position: np.array([x, y, z])
             - quaternion: np.array([qw, qx, qy, qz])
-            
-            Se errore: (None, None)
+
+            On error: (None, None)
         """
         try:
             body_data = self.optitrack.bodies(body_name)
-            
-            # Estrai posizione
+
+            # Extract position
             pos_dict = body_data['bodies']['pos']
             position = np.array([
                 pos_dict['x'],
                 pos_dict['y'],
                 pos_dict['z']
             ])
-            
-            # Estrai quaternione (orientamento)
+
+            # Extract quaternion (orientation)
             att_dict = body_data['bodies']['att']
             quaternion = np.array([
                 att_dict['qw'],
@@ -54,9 +54,9 @@ class OptiTrackHelper:
                 att_dict['qy'],
                 att_dict['qz']
             ])
-            
+
             return position, quaternion
-        
+
         except Exception as e:
             logger.warning(f"Error reading body '{body_name}': {e}")
             return None, None
@@ -64,13 +64,13 @@ class OptiTrackHelper:
 
 def create_optitrack_reader(optitrack_component):
     """
-    Factory per creare una funzione di lettura OptiTrack.
-    
+    Factory that creates an OptiTrack reading function.
+
     Args:
-        optitrack_component: componente 'optitrack' da genomix
-    
+        optitrack_component: 'optitrack' component from genomix
+
     Returns:
-        Una funzione optitrack_reader(body_name) → (position, quaternion)
+        A function optitrack_reader(body_name) → (position, quaternion)
     """
     helper = OptiTrackHelper(optitrack_component)
     return helper.read_body

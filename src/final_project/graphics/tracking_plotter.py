@@ -1,26 +1,26 @@
 """
-Analizza l'inseguimento leader/follower a partire dai log del pom
-(nessun file extra da produrre nel main).
+Analyzes the leader/follower chase from the pom logs
+(no extra file to produce in the main).
 
-Legge (percorsi e parametri FOV di default da final_project/config.py):
-  - pom del leader   (pom_leader_log,   scritto da pom_l.log_state nel main)
-  - pom del follower (pom_follower_log, scritto da pom_f.log_state nel main)
+Reads (paths and default FOV parameters from final_project/config.py):
+  - leader pom   (pom_leader_log,   written by pom_l.log_state in the main)
+  - follower pom (pom_follower_log, written by pom_f.log_state in the main)
 
-Produce un'unica figura:
-  (1) distanza leader-follower su x, y, z (frame globale) + norma
-  (2) errore di yaw (bearing del leader - yaw del follower)
-  (3) angolo verticale del leader nel frame camera (elevazione sull'asse ottico)
-  (4) vista dall'alto (x-y) di leader e follower
+Produces a single figure:
+  (1) leader-follower distance along x, y, z (global frame) + norm
+  (2) yaw error (leader bearing - follower yaw)
+  (3) vertical angle of the leader in the camera frame (elevation over the optical axis)
+  (4) top view (x-y) of leader and follower
 
-Leader fuori dal FOV (calcolato con la stessa geometria di FOVPyramid.measure +
-contains: piramide pinhole) = sfondo rosso nei grafici temporali, tratti rossi
-evidenziati sulle traiettorie nella vista dall'alto.
+Leader out of the FOV (computed with the same geometry as FOVPyramid.measure +
+contains: pinhole pyramid) = red background in the time plots, dashed
+follower segments in the top view.
 
-Uso:
+Usage:
     python3 tracking_plotter.py [--leader PATH] [--follower PATH] [--out PATH]
                                 [--fov-deg H_DEG] [--fov-v-deg V_DEG] [--max-range M] [--rate 20]
-                                [--crop T_START T_END]     (secondi relativi)
-                                [--cols x y z roll pitch yaw]  (indici colonna, default 7 8 9 10 11 12)
+                                [--crop T_START T_END]     (relative seconds)
+                                [--cols x y z roll pitch yaw]  (column indices, default 7 8 9 10 11 12)
 """
 
 import argparse
@@ -31,13 +31,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Wedge
 
-# permette l'esecuzione diretta (python3 velocity_plotter.py) leggendo final_project/config.py
+# allows direct execution (python3 tracking_plotter.py) reading final_project/config.py
 _SRC_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _SRC_ROOT not in sys.path:
     sys.path.insert(0, _SRC_ROOT)
-from final_project.config import CONFIG, config_path, genom_log_path
+from final_project.config import CONFIG, config_path
 
-# Formato pom-genom3: ts i posp attp velp avelp accp x y z roll pitch yaw vx ...
+# pom-genom3 format: ts i posp attp velp avelp accp x y z roll pitch yaw vx ...
 DEFAULT_COLS = [7, 8, 9, 10, 11, 12]  # x y z roll pitch yaw
 NAMES = ["x", "y", "z", "roll", "pitch", "yaw"]
 
@@ -50,7 +50,7 @@ def find_columns(header_tokens):
 
 
 def load_pom_pose(path, cols=None):
-    """Ritorna t[N], pos[N,3], att[N,3] = roll, pitch, yaw (rad, unwrapped) da un pom.log."""
+    """Returns t[N], pos[N,3], att[N,3] = roll, pitch, yaw (rad, unwrapped) from a pom.log."""
     header, rows = None, []
     with open(path, "r") as f:
         for line in f:
@@ -58,7 +58,7 @@ def load_pom_pose(path, cols=None):
             if not line:
                 continue
             toks = line.lstrip("#").split()
-            # l'header di pom ("ts i posp ...") può comparire con o senza '#'
+            # the pom header ("ts i posp ...") can appear with or without '#'
             if toks and toks[0].lower() == "ts":
                 header = toks
                 continue
@@ -68,7 +68,7 @@ def load_pom_pose(path, cols=None):
 
     if cols is None:
         cols = find_columns(header) if header else DEFAULT_COLS
-    # colonna 'i' (intrinsic): teniamo solo le righe in frame world (i == 0)
+    # column 'i' (intrinsic): keep only the rows in the world frame (i == 0)
     i_col = header.index("i") if header and "i" in header else None
 
     need = max(cols) + 1
@@ -85,7 +85,7 @@ def load_pom_pose(path, cols=None):
         except ValueError:
             continue
     if not t:
-        raise RuntimeError(f"Nessun dato valido in {path}")
+        raise RuntimeError(f"No valid data in {path}")
     return np.array(t), np.array(pos), np.unwrap(np.array(att), axis=0)
 
 
@@ -96,26 +96,26 @@ def resample(t_src, pos, att, t_grid):
 
 
 def camera_coords(rel, att, gimbal, cam_yaw=0.0):
-    """Stessa logica di FOVPyramid.measure, vettorializzata: posizione del leader
-    nel frame camera [x avanti (asse ottico), y sinistra, z su]."""
+    """Same logic as FOVPyramid.measure, vectorized: leader position
+    in the camera frame [x forward (optical axis), y left, z up]."""
     roll, pitch, yaw = att[:, 0], att[:, 1], att[:, 2]
-    if gimbal:                                   # camera stabilizzata: solo yaw
+    if gimbal:                                   # stabilized camera: yaw only
         roll, pitch = np.zeros_like(yaw), np.zeros_like(yaw)
     cr, sr, cp, sp, cy, sy = np.cos(roll), np.sin(roll), np.cos(pitch), np.sin(pitch), np.cos(yaw), np.sin(yaw)
-    # R body→world = Rz(yaw)·Ry(pitch)·Rx(roll), una per campione
+    # R body→world = Rz(yaw)·Ry(pitch)·Rx(roll), one per sample
     R = np.stack([
         np.stack([cy*cp, cy*sp*sr - sy*cr, cy*sp*cr + sy*sr], -1),
         np.stack([sy*cp, sy*sp*sr + cy*cr, sy*sp*cr - cy*sr], -1),
         np.stack([-sp,   cp*sr,            cp*cr], -1),
     ], -2)
-    b = np.einsum('nji,nj->ni', R, rel)          # R^T · rel  (assi del drone)
-    c, s = np.cos(cam_yaw), np.sin(cam_yaw)      # assi della camera: ruotati di cam_yaw attorno a z
+    b = np.einsum('nji,nj->ni', R, rel)          # R^T · rel  (drone axes)
+    c, s = np.cos(cam_yaw), np.sin(cam_yaw)      # camera axes: rotated by cam_yaw around z
     return np.column_stack([c * b[:, 0] + s * b[:, 1], -s * b[:, 0] + c * b[:, 1], b[:, 2]])
 
 
 def in_fov_mask(b, half_h_deg, half_v_deg, max_range, near=0.1):
-    """Stessa logica di FOVPyramid.contains: piramide rettangolare (pinhole),
-    range = profondità lungo l'asse ottico. b = camera_coords(...)."""
+    """Same logic as FOVPyramid.contains: rectangular pyramid (pinhole),
+    range = depth along the optical axis. b = camera_coords(...)."""
     tan_h, tan_v = np.tan(np.radians(half_h_deg)), np.tan(np.radians(half_v_deg))
     x = b[:, 0]
     return ((x >= near) & (x <= max_range)
@@ -140,15 +140,15 @@ def main():
     ap.add_argument("--follower", default=config_path("pom_follower_log"))
     ap.add_argument("--out", default=config_path("plot_tracking"))
     ap.add_argument("--fov-deg", type=float, default=CONFIG["fov_half_angle_h_deg"],
-                    help="semi-apertura orizzontale (gradi)")
+                    help="horizontal half-angle (degrees)")
     ap.add_argument("--fov-v-deg", type=float, default=CONFIG["fov_half_angle_v_deg"],
-                    help="semi-apertura verticale (gradi)")
+                    help="vertical half-angle (degrees)")
     ap.add_argument("--max-range", type=float, default=CONFIG["fov_max_range"])
-    ap.add_argument("--rate", type=float, default=20.0, help="Hz della griglia comune")
+    ap.add_argument("--rate", type=float, default=20.0, help="rate of the common grid [Hz]")
     ap.add_argument("--mark-every", type=float, default=5.0,
-                    help="secondi tra i marcatori temporali nella vista dall'alto")
+                    help="seconds between time markers in the top view")
     ap.add_argument("--crop", type=float, nargs=2, metavar=("T0", "T1"),
-                    help="tieni solo [T0, T1] secondi dall'inizio dell'intervallo comune")
+                    help="keep only [T0, T1] seconds from the start of the common interval")
     ap.add_argument("--cols", type=int, nargs=6, metavar=("X", "Y", "Z", "ROLL", "PITCH", "YAW"))
     args = ap.parse_args()
 
@@ -157,8 +157,8 @@ def main():
 
     t_start, t_end = max(tl.min(), tf.min()), min(tl.max(), tf.max())
     if t_end <= t_start:
-        raise RuntimeError("I due log non hanno un intervallo di tempo comune")
-    print(f"Intervallo comune: [{t_start:.3f}, {t_end:.3f}]  (durata: {t_end - t_start:.2f} s)")
+        raise RuntimeError("The two logs have no common time interval")
+    print(f"Common interval: [{t_start:.3f}, {t_end:.3f}]  (duration: {t_end - t_start:.2f} s)")
 
     if args.crop:
         t_start, t_end = t_start + args.crop[0], min(t_end, t_start + args.crop[1])
@@ -167,7 +167,7 @@ def main():
     L, _ = resample(tl, pl, al, tg)
     F, att_f = resample(tf, pf, af, tg)
     cam_yaw = np.radians(CONFIG["camera_yaw_deg"])
-    yaw = att_f[:, 2] + cam_yaw                  # heading della camera (asse ottico)
+    yaw = att_f[:, 2] + cam_yaw                  # camera heading (optical axis)
     t = tg - tg[0]
 
     rel = L - F
@@ -177,7 +177,7 @@ def main():
     gimbal = CONFIG["camera_gimbal"]
     cam = camera_coords(rel, att_f, gimbal, cam_yaw)
     fov = in_fov_mask(cam, args.fov_deg, args.fov_v_deg, args.max_range)
-    # angolo verticale del leader rispetto all'asse ottico: |z| <= x·tan_v  <=>  |elev| <= semi-apertura v
+    # vertical angle of the leader relative to the optical axis: |z| <= x·tan_v  <=>  |elev| <= v half-angle
     elev = np.degrees(np.arctan2(cam[:, 2], cam[:, 0]))
 
     fig = plt.figure(figsize=(16, 10))
@@ -197,22 +197,22 @@ def main():
     ax1.axhline(0, color="gray", lw=0.6)
     ax1.axhline(args.max_range, color="k", ls=":", lw=1, label=f"max range FOV ({args.max_range:g} m)")
     ax1.axhline(CONFIG["tracking_follow_distance"], color="k", ls="--", lw=1,
-                label=f"distanza desiderata ({CONFIG['tracking_follow_distance']:g} m)")
+                label=f"desired distance ({CONFIG['tracking_follow_distance']:g} m)")
     shade(ax1)
     ax1.set_ylabel("Leader − follower [m]")
-    ax1.set_title("Distanza dal leader (frame globale)")
+    ax1.set_title("Distance from the leader (global frame)")
     ax1.grid(alpha=0.3)
     ax1.fill_between([], [], color="tab:red", alpha=0.15, lw=0,
-                     label="leader fuori FOV (camera " + ("gimbal" if gimbal else "rigida") + ")")
+                     label="leader out of FOV (camera " + ("gimbal" if gimbal else "rigid") + ")")
     ax1.legend(loc="upper right", ncol=4, fontsize=8)
 
     ax2.plot(t, yaw_err, color="tab:red", lw=1.4)
     ax2.axhline(0, color="gray", lw=0.6)
     ax2.axhline(args.fov_deg, color="k", ls=":", lw=1)
-    ax2.axhline(-args.fov_deg, color="k", ls=":", lw=1, label=f"±{args.fov_deg:g}° (semi-apertura orizzontale FOV)")
+    ax2.axhline(-args.fov_deg, color="k", ls=":", lw=1, label=f"±{args.fov_deg:g}° (FOV horizontal half-angle)")
     shade(ax2)
-    ax2.set_ylabel("Errore di yaw [deg]")
-    ax2.set_title("Errore di yaw (>0: leader a sinistra, il follower deve ruotare CCW)")
+    ax2.set_ylabel("Yaw error [deg]")
+    ax2.set_title("Yaw error (>0: leader on the left, the follower must rotate CCW)")
     ax2.grid(alpha=0.3)
     ax2.legend(loc="upper right", fontsize=8)
 
@@ -220,32 +220,32 @@ def main():
     ax4.axhline(0, color="gray", lw=0.6)
     ax4.axhline(args.fov_v_deg, color="k", ls=":", lw=1)
     ax4.axhline(-args.fov_v_deg, color="k", ls=":", lw=1,
-                label=f"±{args.fov_v_deg:g}° (semi-apertura verticale FOV)")
+                label=f"±{args.fov_v_deg:g}° (FOV vertical half-angle)")
     shade(ax4)
-    ax4.set_ylabel("Angolo verticale [deg]")
-    ax4.set_xlabel("Tempo [s] (relativo all'inizio dell'intervallo)")
-    ax4.set_title("Angolo verticale del leader sull'asse ottico (>0: leader sopra)")
+    ax4.set_ylabel("Vertical angle [deg]")
+    ax4.set_xlabel("Time [s] (relative to the start of the interval)")
+    ax4.set_title("Vertical angle of the leader over the optical axis (>0: leader above)")
     ax4.grid(alpha=0.3)
     ax4.legend(loc="upper right", fontsize=8)
 
-    # ---- vista dall'alto ----
-    # follower continuo quando vede il leader, tratteggiato e sbiadito quando lo ha perso
+    # ---- top view ----
+    # follower solid when it sees the leader, dashed and faded when it has lost it
     out = ~fov
     ax3.plot(L[:, 0], L[:, 1], color="tab:blue", lw=1.6, label="Leader", zorder=2)
     seen = np.where(fov | np.r_[fov[1:], False], F[:, 0], np.nan), \
         np.where(fov | np.r_[fov[1:], False], F[:, 1], np.nan)
     lost_xy = np.where(out | np.r_[out[1:], False], F[:, 0], np.nan), \
         np.where(out | np.r_[out[1:], False], F[:, 1], np.nan)
-    ax3.plot(*seen, color="tab:orange", lw=1.8, label="Follower (leader nel FOV)", zorder=2)
+    ax3.plot(*seen, color="tab:orange", lw=1.8, label="Follower (leader in FOV)", zorder=2)
     ax3.plot(*lost_xy, color="tab:orange", lw=1.4, ls=(0, (3, 2)), alpha=0.55,
-             label="Follower (leader fuori FOV)", zorder=2)
+             label="Follower (leader out of FOV)", zorder=2)
 
-    # marcatori temporali: stesse istanti su entrambe le traiettorie + ventaglio del FOV
+    # time markers: same instants on both trajectories + FOV fan
     span = np.ptp(np.vstack([L[:, :2], F[:, :2]]), axis=0).max()
     fan_r = 0.06 * max(span, 1.0)
     half = np.radians(args.fov_deg)
     marks = np.searchsorted(t, np.arange(0.0, t[-1], args.mark_every))
-    last_label = None                                     # niente etichette sovrapposte (drone fermo)
+    last_label = None                                     # no overlapping labels (drone at rest)
     for i in marks:
         ax3.plot([L[i, 0], F[i, 0]], [L[i, 1], F[i, 1]], color="0.6", lw=0.7, ls=":", zorder=1)
         ax3.add_patch(Wedge(F[i, :2], fan_r, np.degrees(yaw[i] - half), np.degrees(yaw[i] + half),
@@ -257,32 +257,32 @@ def main():
                          fontsize=7, color="0.3", zorder=4)
             last_label = F[i, :2]
 
-    # inizio di ogni perdita: croce sulla posizione del follower
+    # start of each loss: cross on the follower position
     lost = np.flatnonzero(out & ~np.r_[False, out[:-1]])
     ax3.plot(F[lost, 0], F[lost, 1], "x", color="tab:red", ms=7, mew=1.8, zorder=4,
-             label="Leader perso")
+             label="Leader lost")
     for P, c in ((L, "tab:blue"), (F, "tab:orange")):
         ax3.plot(*P[0, :2], "o", color=c, ms=8, mec="k", mew=0.8, zorder=5)
         ax3.plot(*P[-1, :2], "s", color=c, ms=8, mec="k", mew=0.8, zorder=5)
-    ax3.plot([], [], "o", color="0.5", ms=7, mec="k", mew=0.8, label="start  (□ = fine)")
+    ax3.plot([], [], "o", color="0.5", ms=7, mec="k", mew=0.8, label="start  (□ = end)")
     ax3.add_patch(Wedge((0, 0), 0, 0, 0, color="tab:red", alpha=0.25,
-                        label=f"FOV camera ogni {args.mark_every:g} s"))
+                        label=f"camera FOV every {args.mark_every:g} s"))
     ax3.set_aspect("equal", adjustable="datalim")
     ax3.set_xlabel("x [m]"); ax3.set_ylabel("y [m]")
-    ax3.set_title("Vista dall'alto", fontsize=11)
+    ax3.set_title("Top view", fontsize=11)
     ax3.grid(alpha=0.3)
     ax3.legend(loc="upper center", bbox_to_anchor=(0.5, -0.08), ncol=2, fontsize=8, frameon=False)
 
     fig.tight_layout()
     fig.savefig(args.out, dpi=150)
-    print(f"Plot salvato in: {args.out}")
+    print(f"Plot saved to: {args.out}")
 
     if fov.any():
-        print(f"[Leader nel FOV, {fov.sum()} campioni]")
+        print(f"[Leader in FOV, {fov.sum()} samples]")
         print(f"  RMS Δx,Δy,Δz [m] : {np.sqrt((rel[fov] ** 2).mean(axis=0)).round(3)}")
-        print(f"  distanza media   : {dist[fov].mean():.3f} m  (max {dist[fov].max():.3f} m)")
+        print(f"  mean distance    : {dist[fov].mean():.3f} m  (max {dist[fov].max():.3f} m)")
         print(f"  RMS yaw err      : {np.sqrt(np.nanmean(yaw_err[fov] ** 2)):.2f} deg")
-    print(f"Frazione di tempo fuori FOV: {100 * (~fov).mean():.1f} %")
+    print(f"Fraction of time out of FOV: {100 * (~fov).mean():.1f} %")
 
 
 if __name__ == "__main__":

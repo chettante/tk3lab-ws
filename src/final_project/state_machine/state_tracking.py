@@ -1,7 +1,7 @@
 """
-TrackingState: inseguimento del leader con controllore P + feedforward.
-Transizioni:
-  - → SEARCHING se il leader resta fuori dal FOV oltre out_of_fov_timeout
+TrackingState: chases the leader with a P + feedforward controller.
+Transitions:
+  - → SEARCHING if the leader stays out of the FOV longer than out_of_fov_timeout
 """
 
 import logging
@@ -21,19 +21,19 @@ class TrackingState:
         tracker,
         optitrack_helper,
         follower_bodies,
-        kp_angle=1.0,
-        max_acc=3.0,
-        out_of_fov_timeout=0.6,
+        kp_angle,
+        max_acc,
+        out_of_fov_timeout,
     ):
         """
         Args:
             camera: FOVPyramid instance
             tracker: TrackingController instance
-            optitrack_helper: funzione che legge le posizioni da OptiTrack
+            optitrack_helper: function that reads the poses from OptiTrack
             follower_bodies: tuple ('QR4_leading', 'QR4_following')
-            kp_angle: guadagno proporzionale sullo yaw
-            max_acc: limite di accelerazione passato al planner (m/s²)
-            out_of_fov_timeout: secondi fuori FOV prima di passare a SEARCHING
+            kp_angle: proportional gain on yaw
+            max_acc: acceleration passed to maneuver.velocity() as ax, ay, az (m/s²)
+            out_of_fov_timeout: seconds out of the FOV before switching to SEARCHING
         """
         self.camera = camera
         self.tracker = tracker
@@ -43,24 +43,20 @@ class TrackingState:
         self.max_acc = max_acc
         self.out_of_fov_timeout = out_of_fov_timeout
 
-        # impostato da enter(), chiamato dalla StateMachine a ogni transizione
-        self.enter_time = None
+        # reset by enter(), called by the StateMachine on every transition
         self.last_fov_time = None
         self.ticks_since_enter = 0
         self.wasnt_in_fov = True
         self.last_leader_pos = None
         self.last_leader_vel = np.zeros(3)
-        # velocità misurata del follower (OptiTrack) per il FF dello yaw
+        # measured follower velocity (OptiTrack) for the yaw FF
         self.follower_vel_estimator = VelocityEstimator(log=False)
 
         self.loop_count = 0
-        self.in_fov_count = 0
-        self.out_fov_count = 0
 
     def enter(self):
-        """Chiamato dalla StateMachine a ogni ingresso in TRACKING: azzera lo stato del ciclo precedente."""
-        self.enter_time = time.time()
-        self.last_fov_time = self.enter_time
+        """Called by the StateMachine on every entry into TRACKING: resets the state of the previous round."""
+        self.last_fov_time = time.time()
         self.ticks_since_enter = 0
         self.wasnt_in_fov = True
         self.last_leader_pos = None
@@ -70,10 +66,10 @@ class TrackingState:
 
     def update(self):
         """
-        1. Legge le pose da OptiTrack
-        2. Se il leader è nel FOV: aggiorna la stima di velocità e inseguilo
-        3. Se è fuori: continua sulla posizione estrapolata fino a out_of_fov_timeout,
-           poi ferma il drone e passa a SEARCHING
+        1. Reads the poses from OptiTrack
+        2. If the leader is in the FOV: updates the velocity estimate and chases it
+        3. If it is out: keeps going on the extrapolated position until out_of_fov_timeout,
+           then switches to SEARCHING
         """
         self.loop_count += 1
         now = time.time()
@@ -82,21 +78,19 @@ class TrackingState:
         follower_pos, follower_quat = self.optitrack_helper(self.follower_body_name)
 
         if leader_pos is None or follower_pos is None:
-            logger.debug("Could not read positions")
             return None
 
-        # heading della camera = yaw del drone + yaw di montaggio: il controllo di yaw
-        # centra il leader sull'asse ottico, non sull'asse x del drone
+        # camera heading = drone yaw + mounting yaw: the yaw control
+        # centers the leader on the optical axis, not on the drone x axis
         camera_yaw = _quat_to_yaw(follower_quat) + self.camera.yaw_offset
         pos_in_body = self.camera.measure(leader_pos, follower_pos, follower_quat)
         follower_vel = self.follower_vel_estimator.update_world(follower_pos)
         self.ticks_since_enter += 1
 
         if self.camera.contains(pos_in_body):
-            self.in_fov_count += 1
             self.last_fov_time = now
 
-            # posizione e velocità del leader dalla misura della camera
+            # leader position and velocity from the camera measurement
             leader_vel, leader_cam_pos = self.tracker.velocity_estimator.update(
                 pos_in_body, follower_pos, follower_quat, self.camera, self.wasnt_in_fov
             )
@@ -108,7 +102,6 @@ class TrackingState:
             vel_est = self.last_leader_vel
 
         else:
-            self.out_fov_count += 1
             self.wasnt_in_fov = True
             elapsed_out = now - self.last_fov_time
 
@@ -119,16 +112,16 @@ class TrackingState:
                 )
                 return StateType.SEARCHING
 
-            # grace period: continua sulla posizione estrapolata
+            # grace period: keep going on the extrapolated position
             leader_est = self.last_leader_pos + self.last_leader_vel * elapsed_out
             vel_est = self.last_leader_vel
 
             if self.loop_count % 10 == 0:
                 logger.debug(f"[TRACKING] Leader OUT of FOV for {elapsed_out:.2f}s (predicting)")
 
-        # bumpless transfer: al primo ciclo la velocità del follower non è ancora misurabile
-        # (servono due campioni), quindi si lascia attivo l'ultimo comando (searching/exploring);
-        # al secondo il rate limiter parte dalla velocità misurata invece che da fermo
+        # bumpless transfer: on the first cycle the follower velocity is not measurable yet
+        # (two samples are needed), so the last command (searching/exploring) is left active;
+        # on the second one the rate limiter starts from the measured velocity instead of from rest
         if self.ticks_since_enter == 1:
             return None
         if self.ticks_since_enter == 2:

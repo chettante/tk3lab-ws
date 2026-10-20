@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """
-Allinea la camera del modello Gazebo al FOV del config:
-  - <horizontal_fov> = 2 * fov_half_angle_h_deg          (in radianti)
-  - <height>         = <width> · tan(v) / tan(h)         (Gazebo ricava l'apertura
-                       verticale dal rapporto altezza/larghezza dell'immagine)
-  - <far>            = fov_max_range                     (clip della camera, m)
-  - <pose> (yaw)     = camera_yaw_deg                    (montaggio della camera)
-La larghezza dell'immagine resta quella già presente nell'SDF (conta solo il rapporto).
+Aligns the camera of the Gazebo model with the FOV in the config:
+  - <horizontal_fov> = 2 * fov_half_angle_h_deg          (in radians)
+  - <height>         = <width> · tan(v) / tan(h)         (Gazebo derives the vertical
+                       aperture from the image height/width ratio)
+  - <far>            = fov_max_range                     (camera clip, m)
+  - <pose> (yaw)     = camera_yaw_deg                    (camera mounting)
+The image width stays the one already in the SDF (only the ratio matters).
 
-Nel world aggiorna anche lo yaw di spawn del follower, così che all'avvio l'asse
-ottico punti dritto sul leader: yaw = bearing(follower → leader) − camera_yaw_deg.
+In the world it also updates the follower spawn yaw, so that at startup the optical
+axis points straight at the leader: yaw = bearing(follower → leader) − camera_yaw_deg.
 
-Gazebo legge l'SDF solo all'avvio: quad_simulation.sh lo chiama prima di 'gz sim'.
-La camera c'è solo nel modello del follower (mrsim-quadrotor): il leader usa
-mrsim-quadrotor-leader, identico ma senza camera, per non renderizzarla.
-Le modifiche alla fisica del drone vanno fatte in entrambi i model.sdf.
-camera_gimbal non ha effetto sull'SDF: in Gazebo la camera resta rigida sul corpo.
+Gazebo reads the SDF only at startup: quad_simulation.sh calls this before 'gz sim'.
+The camera exists only in the follower model (mrsim-quadrotor): the leader uses
+mrsim-quadrotor-leader, identical but without camera, so it is not rendered.
+Changes to the drone physics must be made in both model.sdf files.
+camera_gimbal has no effect on the SDF: in Gazebo the camera stays rigid on the body.
 
-Uso:
+Usage:
     python3 sync_camera_fov.py [PATH_MODEL_SDF [PATH_WORLD]]
 """
 
@@ -26,13 +26,13 @@ import os
 import re
 import sys
 
-# permette l'esecuzione diretta leggendo final_project/config.py:
-# risale le cartelle finché trova quella che contiene final_project/ (cioè src/)
+# allows direct execution reading final_project/config.py:
+# walks up the folders until it finds the one containing final_project/ (i.e. src/)
 _SRC_ROOT = os.path.dirname(os.path.abspath(__file__))
 while not os.path.isfile(os.path.join(_SRC_ROOT, 'final_project', 'config.py')):
     parent = os.path.dirname(_SRC_ROOT)
     if parent == _SRC_ROOT:
-        sys.exit("Impossibile trovare final_project/config.py risalendo da " + __file__)
+        sys.exit("Cannot find final_project/config.py walking up from " + __file__)
     _SRC_ROOT = parent
 if _SRC_ROOT not in sys.path:
     sys.path.insert(0, _SRC_ROOT)
@@ -44,17 +44,17 @@ DEFAULT_WORLD = os.path.join(os.path.dirname(_SRC_ROOT), 'gazebo', 'worlds', 'ex
 
 
 def _include_pose(world, name):
-    """Match della riga <pose> dell'<include> con <name>name</name>."""
+    """Match of the <pose> line of the <include> with <name>name</name>."""
     m = re.search(r'<include>(?:(?!</include>).)*?<name>' + re.escape(name) + r'</name>'
                   r'(?:(?!</include>).)*?(<pose>([^<]*)</pose>)', world, re.S)
     if m is None:
-        sys.exit(f"Nessun <include> con <name>{name}</name> e <pose> nel world")
+        sys.exit(f"No <include> with <name>{name}</name> and <pose> in the world")
     return m
 
 
 def sync_spawn_yaw(path, leader='qr4_leading', follower='qr4_following'):
-    """Posizione di spawn del follower da follower_spawn_mode (near/far) e
-    yaw = bearing verso il leader − yaw di montaggio della camera."""
+    """Follower spawn position from follower_spawn_mode (near/far) and
+    yaw = bearing to the leader − camera mounting yaw."""
     with open(path) as f:
         world = f.read()
     pl = [float(v) for v in _include_pose(world, leader).group(2).split()]
@@ -62,7 +62,7 @@ def sync_spawn_yaw(path, leader='qr4_leading', follower='qr4_following'):
     pf = [float(v) for v in mf.group(2).split()]
     mode = CONFIG['follower_spawn_mode']
     if mode not in ('near', 'far'):
-        sys.exit(f"follower_spawn_mode deve essere 'near' o 'far', non {mode!r}")
+        sys.exit(f"follower_spawn_mode must be 'near' or 'far', not {mode!r}")
     pf[0], pf[1] = CONFIG[f'follower_spawn_{mode}_xy']
     bearing = math.atan2(pl[1] - pf[1], pl[0] - pf[0])
     yaw = math.atan2(math.sin(bearing - math.radians(CONFIG['camera_yaw_deg'])),
@@ -74,7 +74,7 @@ def sync_spawn_yaw(path, leader='qr4_leading', follower='qr4_following'):
             f.write(new)
     print(f"World {path}: spawn {follower} ({mode}) in ({pf[0]:g}, {pf[1]:g}), "
           f"yaw {math.degrees(yaw):.1f}° "
-          f"(bearing verso {leader} {math.degrees(bearing):.1f}° − camera {CONFIG['camera_yaw_deg']:g}°)")
+          f"(bearing to {leader} {math.degrees(bearing):.1f}° − camera {CONFIG['camera_yaw_deg']:g}°)")
 
 
 def sync(path):
@@ -86,10 +86,10 @@ def sync(path):
     with open(path) as f:
         sdf = f.read()
 
-    # solo dentro il blocco <sensor type="camera">...</sensor>
+    # only inside the <sensor type="camera">...</sensor> block
     m = re.search(r'<sensor type="camera".*?</sensor>', sdf, re.S)
     if m is None:
-        sys.exit(f"Nessun <sensor type=\"camera\"> in {path}")
+        sys.exit(f"No <sensor type=\"camera\"> in {path}")
     cam = m.group(0)
 
     width = int(re.search(r'<width>\s*(\d+)\s*</width>', cam).group(1))
@@ -100,27 +100,28 @@ def sync(path):
                  f'<horizontal_fov>{fov_rad:.6f}</horizontal_fov>', cam)
     cam = re.sub(r'<height>[^<]*</height>', f'<height>{height}</height>', cam)
     cam = re.sub(r'<far>[^<]*</far>', f'<far>{rng:g}</far>', cam)
-    # yaw di montaggio: sostituisce il 6° valore della <pose> del sensore (x y z roll pitch yaw)
+    # mounting yaw: replaces the 6th value of the sensor <pose> (x y z roll pitch yaw)
     pm = re.search(r'(<pose>)([^<]*)(</pose>)', cam)
     pose = pm.group(2).split()
     pose[5] = f"{math.radians(CONFIG['camera_yaw_deg']):.6f}"
     cam = cam[:pm.start(2)] + " ".join(pose) + cam[pm.end(2):]
     cam = re.sub(r'<!-- Pose: .*?-->',
-                 f"<!-- Pose: X Y Z Roll Pitch Yaw -> asse ottico ruotato di "
-                 f"{CONFIG['camera_yaw_deg']:g}° attorno a z rispetto all'asse x del drone, da config.py -->", cam)
-    cam = re.sub(r'<!-- FOV orizzontale totale:.*?-->',
-                 f'<!-- FOV orizzontale totale: {h:g}° a sx + {h:g}° a dx = {2*h:g}° '
-                 f'({fov_rad:.6f} rad), da config.py -->', cam)
-    cam = re.sub(r'<!-- Max range di .*?-->', f'<!-- Max range di {rng:g} metri, da config.py -->', cam)
+                 f"<!-- Pose: X Y Z Roll Pitch Yaw -> optical axis rotated by "
+                 f"{CONFIG['camera_yaw_deg']:g}° around z relative to the drone x axis, from config.py -->", cam)
+    # the patterns also match the old Italian comments, so older SDF files are updated too
+    cam = re.sub(r'<!-- (?:FOV orizzontale totale|Total horizontal FOV):.*?-->',
+                 f'<!-- Total horizontal FOV: {h:g}° left + {h:g}° right = {2*h:g}° '
+                 f'({fov_rad:.6f} rad), from config.py -->', cam)
+    cam = re.sub(r'<!-- Max range (?:di|of) .*?-->', f'<!-- Max range of {rng:g} meters, from config.py -->', cam)
     new = sdf[:m.start()] + cam + sdf[m.end():]
-    new = re.sub(r'<!-- TELECAMERA[^(]*\(FOV TOTALE .*?\) -->',
-                 f'<!-- TELECAMERA (FOV TOTALE {2*h:g}°x{2*v:g}°, RANGE {rng:g}M) -->', new)
+    new = re.sub(r'<!-- (?:TELECAMERA|CAMERA)[^(]*\((?:FOV TOTALE|TOTAL FOV) .*?\) -->',
+                 f'<!-- CAMERA (TOTAL FOV {2*h:g}°x{2*v:g}°, RANGE {rng:g}M) -->', new)
 
     if new != sdf:
         with open(path, 'w') as f:
             f.write(new)
-    print(f"Camera {path}: FOV {2*h:g}° x {2*v:g}° (immagine {width}x{height} → "
-          f"verticale effettiva {2*v_real:.2f}°), range {rng:g} m")
+    print(f"Camera {path}: FOV {2*h:g}° x {2*v:g}° (image {width}x{height} → "
+          f"effective vertical {2*v_real:.2f}°), range {rng:g} m")
 
 
 if __name__ == '__main__':

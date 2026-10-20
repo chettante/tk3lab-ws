@@ -17,64 +17,62 @@ class TrajectoryHandler:
         self.A = A
         self.B = B
         self.H = H
-        # Mantiene lo stesso punto iniziale del generatore usato dallo script
-        # di prova. La copia evita di condividere un array mutabile tra istanze.
+        # Starting point of the figure-8 (the trajectory is translated so it starts here).
+        # Note: not copied, the array is shared with the caller.
         self.P0 = P0
 
-        # Risoluzione della griglia usata per approssimare la lunghezza
-        # d'arco (vedi _build_arc_length_table). Non è legata a 'period':
-        # è solo una questione di quanto finemente vogliamo campionare
-        # la GEOMETRIA dell'otto, indipendentemente da come poi lo si
-        # percorre nel tempo.
+        # Resolution of the grid used to approximate the arc length
+        # (see _build_arc_length_table). It is not tied to 'period':
+        # it only sets how finely the GEOMETRY of the figure-8 is sampled,
+        # independently of how it is then travelled in time.
         self.arc_resolution = arc_resolution
 
-        # Tabella di lunghezza d'arco: rende costante la velocita' reale
-        # del drone nella fase di crociera anche nelle parti curve
-        # dell'otto. Dipende da A, B, H (tramite otto_path), quindi va
-        # (ri)costruita ogni volta che questi cambiano: qui la calcoliamo
-        # una sola volta in __init__, non ad ogni chiamata di
-        # generate_otto_trajectory.
+        # Arc-length table: keeps the actual drone speed constant during
+        # the cruise phase, also on the curved parts of the figure-8.
+        # It depends on A, B, H (through otto_path), so it must be
+        # (re)built whenever they change: here it is computed once
+        # in __init__, not at every call of generate_otto_trajectory.
         self._ARC_S, self._ARC_LENGTH, self._PATH_LENGTH = self._build_arc_length_table()
 
-        # Traiettoria completa (pos/vel/acc per OGNI istante da 0 a T),
-        # calcolata una sola volta qui: dipende solo da A, B, H, P0,
-        # duration, period, che sono fissi per questa istanza.
-        # update_trajectory() la scorre un passo alla volta.
+        # Full trajectory (pos/vel/acc for EVERY instant from 0 to T),
+        # computed only once here: it depends only on A, B, H, P0,
+        # duration, period, which are fixed for this instance.
+        # update_trajectory() walks through it one step at a time.
         self._pos, self._vel, self._acc = self.generate_otto_trajectory()
-        self._step = 0  # indice del prossimo punto da inviare
+        self._step = 0  # index of the next point to send
         self._stop_sent = False
 
     @classmethod
     def from_speed(cls, speed, **kwargs):
-        """Crea l'otto percorso alla velocità di crociera `speed` [m/s]:
-        la durata si ricava dalla lunghezza dell'otto (inverso di cruise_speed)."""
+        """Creates the figure-8 travelled at cruise speed `speed` [m/s]:
+        the duration is derived from the figure-8 length (inverse of cruise_speed)."""
         geometry = {k: kwargs[k] for k in ("A", "B", "H", "P0", "arc_resolution") if k in kwargs}
-        probe = cls(duration=1.0, period=1.0, **geometry)    # solo per la lunghezza del percorso
+        probe = cls(duration=1.0, period=1.0, **geometry)    # only for the path length
         duration = probe._PATH_LENGTH / (speed * (1.0 - 0.5 * 0.15))
         return cls(duration=duration, **kwargs)
 
     @property
     def cruise_speed(self):
-        """Velocità di crociera [m/s] lungo l'otto (vedi otto_time_law, ramp_fraction=0.15)."""
+        """Cruise speed [m/s] along the figure-8 (see otto_time_law, ramp_fraction=0.15)."""
         return self._PATH_LENGTH / (self.duration * (1.0 - 0.5 * 0.15))
 
     @property
     def is_complete(self):
-        """True quando tutti i campioni della traiettoria sono stati inviati."""
+        """True when all trajectory samples have been sent."""
         return self._step > self.n_steps
 
     def _sample_times(self):
-        """Restituisce gli stessi istanti k * period dello script di prova."""
+        """Returns the sample instants k * period."""
         return np.arange(self.n_steps + 1) * self.period
 
     def _build_arc_length_table(self):
-        """Costruisce la tabella (s -> lunghezza d'arco percorsa) per
-        l'otto definito dagli A, B, H correnti di questa istanza.
+        """Builds the table (s -> travelled arc length) for the
+        figure-8 defined by the current A, B, H of this instance.
 
-        Ritorna:
-            arc_s      : griglia di valori di s in [0, 1]
-            arc_length : lunghezza percorsa cumulata, stessa forma di arc_s
-            path_length: lunghezza totale dell'intero otto (scalare)
+        Returns:
+            arc_s      : grid of s values in [0, 1]
+            arc_length : cumulative travelled length, same shape as arc_s
+            path_length: total length of the whole figure-8 (scalar)
         """
         arc_s = np.linspace(0.0, 1.0, self.arc_resolution)
         _, arc_df, _ = self.otto_path(arc_s)
@@ -87,26 +85,26 @@ class TrajectoryHandler:
         return arc_s, arc_length, path_length
 
     def otto_time_law(self, t=None, ramp_fraction=0.15):
-        """Legge temporale: accelerazione liscia, poi velocita' di crociera.
+        """Time law: smooth acceleration, then cruise speed.
 
-        Il drone parte da fermo, raggiunge la massima velocita' lungo la
-        lunghezza d'arco dopo ``ramp_fraction * T`` e la mantiene fino a ``T``.
-        Di conseguenza a ``t = T`` la velocita' e' ancora non nulla: chi vuole
-        fermarsi esattamente nel punto finale deve aggiungere una decelerazione.
+        The drone starts at rest, reaches its maximum speed along the
+        arc length after ``ramp_fraction * T`` and keeps it until ``T``.
+        Hence at ``t = T`` the speed is still non-zero: to stop exactly
+        at the final point a deceleration must be added.
         """
         T = self.duration
         if t is None:
             t = self._sample_times()
         if T <= 0:
-            raise ValueError("T deve essere maggiore di zero")
+            raise ValueError("T must be greater than zero")
         if not 0 < ramp_fraction < 1:
-            raise ValueError("ramp_fraction deve essere compresa tra 0 e 1")
+            raise ValueError("ramp_fraction must be between 0 and 1")
 
         t = np.clip(t, 0.0, T)
         ramp_time = ramp_fraction * T
 
-        # L'area sotto s_dot deve essere 1: meta' della rampa ha velocita'
-        # media pari a meta' della velocita' di crociera.
+        # The area under s_dot must be 1: during the ramp the average
+        # speed is half of the cruise speed.
         cruise_sd = 1.0 / (T - 0.5 * ramp_time)
         u = t / ramp_time
         in_ramp = t < ramp_time
@@ -122,7 +120,7 @@ class TrajectoryHandler:
         return s, sd, sdd
 
     def otto_path(self, s):
-        """Geometria dell'otto e sue derivate rispetto a s."""
+        """Figure-8 geometry and its derivatives with respect to s."""
         c1, c2 = 2*np.pi, 4*np.pi
         f = np.array([
             (self.B/2) * np.sin(c2*s),
@@ -143,11 +141,10 @@ class TrajectoryHandler:
 
     def generate_otto_trajectory(self):
         """
-        Setpoint dell'otto al tempo t (0 <= t <= T), traslato in modo che
-        parta e arrivi in p0. Restituisce pos, vel, acc (ciascuno con 3
-        righe: x, y, z).
+        Figure-8 setpoints at all sample times (0 <= t <= T), translated so
+        that it starts and ends in p0. Returns pos, vel, acc (each with 3
+        rows: x, y, z).
         """
-        T = self.duration
         t = self._sample_times()
         p0 = self.P0
 
@@ -164,11 +161,11 @@ class TrajectoryHandler:
         sdd = (distance_ddot / path_speed
                - distance_dot**2 * path_speed_derivative / path_speed**3)
 
-        # Spostamento costante che porta il primo punto dell'otto in p0.
-        # Non cambia velocità e accelerazione (la derivata di una costante è zero).
+        # Constant offset that moves the first point of the figure-8 to p0.
+        # It does not change velocity and acceleration (the derivative of a constant is zero).
         f0, _, _ = self.otto_path(0.0)
         offset = np.asarray(p0, dtype=float) - f0
-        offset = offset.reshape((3,) + (1,) * np.ndim(t))   # funziona sia con t scalare sia con array
+        offset = offset.reshape((3,) + (1,) * np.ndim(t))   # works with both scalar and array t
 
         pos = f + offset
         vel = df * sd
@@ -176,18 +173,16 @@ class TrajectoryHandler:
         return pos, vel, acc
 
     def update_trajectory(self, target_maneuver):
-        """Esegue UN passo della traiettoria (un punto x,y,z + comando di
-        velocita'/accelerazione) e avanza lo stato interno di un tick.
+        """Executes ONE step of the trajectory (one x,y,z point + velocity/
+        acceleration command) and advances the internal state by one tick.
 
-        Va chiamato una volta per ogni iterazione del loop a tempo reale,
-        esattamente come faceva ``generate_trajectory(t, T)`` nel main()
-        originale — ma qui il punto viene letto dalla traiettoria
-        precalcolata in __init__ invece di essere ricalcolato ogni volta.
+        Must be called once per iteration of the real-time loop. The point
+        is read from the trajectory precomputed in __init__ instead of
+        being recomputed every time.
         """
         if self.is_complete:
-            # Lo script di prova termina qui. Nella state machine il loop
-            # prosegue, quindi annulliamo una sola volta l'ultimo comando,
-            # che al tempo T ha ancora velocita' di crociera.
+            # The loop keeps running after the figure-8 ends, so the last
+            # command (which at time T still has cruise speed) is cancelled once.
             if not self._stop_sent:
                 target_maneuver.velocity(0, 0, 0, 0, 0, 0, 0, 0)
                 self._stop_sent = True

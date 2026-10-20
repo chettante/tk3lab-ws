@@ -1,10 +1,10 @@
 """
-SearchingState: il leader è uscito dal FOV, il follower esegue la manovra di ricerca
-(LeaderSearchManeuver) un passo per ciclo del main loop.
+SearchingState: the leader has left the FOV, the follower runs the search maneuver
+(LeaderSearchManeuver) one step per main loop cycle.
 
-Transizioni:
-  - → TRACKING se il leader rientra nel FOV
-  - → IDLE a fine manovra (leader non ritrovato)
+Transitions:
+  - → TRACKING if the leader re-enters the FOV
+  - → IDLE at the end of the maneuver (leader not found)
 """
 
 import logging
@@ -31,12 +31,12 @@ class SearchingState:
         """
         Args:
             camera: FOVPyramid instance
-            optitrack_helper: funzione che legge le posizioni da OptiTrack
-            vel_estimator: VelocityEstimator del leader (lo stesso del tracker)
-            tracking_state: TrackingState, per l'istante dell'ultimo avvistamento
+            optitrack_helper: function that reads the poses from OptiTrack
+            vel_estimator: leader VelocityEstimator (the same as the tracker's)
+            tracking_state: TrackingState, for the time of the last sighting
             follower_bodies: tuple ('QR4_leading', 'QR4_following')
             search: LeaderSearchManeuver instance
-            maneuver_follower: componente maneuver del follower
+            maneuver_follower: follower maneuver component
         """
         self.camera = camera
         self.optitrack_helper = optitrack_helper
@@ -46,30 +46,25 @@ class SearchingState:
         self.tracking_state = tracking_state
         self.maneuver_follower = maneuver_follower
 
-        # impostato da enter(), chiamato dalla StateMachine a ogni transizione
-        self.enter_time = None
-        self._planned = False           # manovra già pianificata per questa ricerca
-        self._phase = None              # fase corrente, per loggare i cambi
-
-        self.loop_count = 0
+        # reset by enter(), called by the StateMachine on every transition
+        self._planned = False           # maneuver already planned for this search
+        self._phase = None              # current phase, to log the changes
 
     def _stop(self):
         self.maneuver_follower.velocity(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0)
 
     def enter(self):
-        """Chiamato dalla StateMachine a ogni ingresso in SEARCHING: la manovra va ripianificata."""
-        self.enter_time = time.time()
+        """Called by the StateMachine on every entry into SEARCHING: the maneuver must be replanned."""
         self._planned = False
         self._phase = None
 
     def update(self):
         """
-        1. Legge le pose da OptiTrack e rifà la misura della camera
-        2. Se il leader è nel FOV → TRACKING
-        3. Al primo ciclo pianifica la manovra dall'ultima stima del leader
-        4. Esegue un passo della manovra; a fine manovra ferma il drone → IDLE
+        1. Reads the poses from OptiTrack and repeats the camera measurement
+        2. If the leader is in the FOV → TRACKING
+        3. On the first cycle plans the maneuver from the last leader estimate
+        4. Runs one step of the maneuver; at the end stops the drone → IDLE
         """
-        self.loop_count += 1
 
         leader_pos, _ = self.optitrack_helper(self.leader_body_name)
         follower_pos, follower_quat = self.optitrack_helper(self.follower_body_name)
@@ -80,8 +75,8 @@ class SearchingState:
             return StateType.TRACKING
 
         if not self._planned:
-            # ultima stima del leader dal VelocityEstimator: il leader è fuori FOV,
-            # quindi non c'è una nuova misura da differenziare
+            # last leader estimate from the VelocityEstimator: the leader is out of the FOV,
+            # so there is no new measurement to differentiate
             p_leader_last = self.vel_estimator.old_pos
             camera_yaw = _quat_to_yaw(follower_quat) + self.camera.yaw_offset
             last_seen = self.tracking_state.last_fov_time
@@ -113,7 +108,7 @@ class SearchingState:
             self._stop()
             return StateType.IDLE
 
-        # un NaN mandato a maneuver fa crashare il suo planner (kdtp): meglio fermarsi
+        # a NaN sent to maneuver crashes its planner (kdtp): better to stop
         if not (np.all(np.isfinite(vel)) and np.all(np.isfinite(acc)) and np.isfinite(yaw_rate)):
             logger.error(f"Non-finite search command (vel={vel}, acc={acc}, wz={yaw_rate}), "
                          "stopping and transitioning to IDLE")

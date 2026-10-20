@@ -1,12 +1,12 @@
 """
-ExploringState: il follower orbita attorno al volume di esplorazione guardandone il centro.
+ExploringState: the follower orbits around the exploration volume while looking at its center.
 
-Percorso: un tratto di collegamento rettilineo fino all'anello, poi un giro completo
-dell'anello salendo da z_low a z_high nella prima metà e scendendo nella seconda.
+Path: a straight connector segment to the ring, then one full lap of the ring,
+climbing from z_low to z_high in the first half and descending in the second.
 
-Transizioni:
-  - → TRACKING se il leader entra nel FOV
-  - → IDLE a fine giro (leader non trovato) o se il percorso non è pianificabile
+Transitions:
+  - → TRACKING if the leader enters the FOV
+  - → IDLE at the end of the lap (leader not found) or if the path cannot be planned
 """
 
 import logging
@@ -38,12 +38,12 @@ class ExploringState:
     ):
         """
         Args:
-            explore_bounds: ((x_min, x_max), (y_min, y_max), (z_min, z_max)) del volume
-            ring_clearance: m, margine dell'anello oltre gli spigoli del volume
-            top_clearance: m, distanza della quota massima dal tetto del volume
-            max_velocity, max_acc: limiti del tratto di collegamento
-            explore_velocity: m/s, velocità lungo l'anello
-            explore_yaw_rate: rad/s, yaw rate massimo per puntare il centro
+            explore_bounds: ((x_min, x_max), (y_min, y_max), (z_min, z_max)) of the volume
+            ring_clearance: m, ring margin beyond the volume corners
+            top_clearance: m, distance of the maximum altitude from the volume ceiling
+            max_velocity, max_acc: limits of the connector segment
+            explore_velocity: m/s, velocity along the ring
+            explore_yaw_rate: rad/s, maximum yaw rate to point at the center
         """
         self.camera = camera
         self.optitrack_helper = optitrack_helper
@@ -58,14 +58,14 @@ class ExploringState:
         self.explore_velocity = explore_velocity
         self.explore_yaw_rate = explore_yaw_rate
 
-        self._planned = False           # piano valido per questa esplorazione
-        self._path_time = 0.0           # tempo trascorso lungo il percorso
+        self._planned = False           # valid plan for this exploration
+        self._path_time = 0.0           # time elapsed along the path
 
     def _stop(self):
         self.maneuver_follower.velocity(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0)
 
     def enter(self):
-        """Chiamato dalla StateMachine a ogni ingresso in EXPLORING: ripianifica dalla posa attuale."""
+        """Called by the StateMachine on every entry into EXPLORING: replans from the current pose."""
         self._path_time = 0.0
         self._planned = False
         follower_pos, _ = self.optitrack_helper(self.follower_body_name)
@@ -80,18 +80,18 @@ class ExploringState:
             logger.warning("Exploration could not be planned (no follower pose or invalid bounds)")
 
     def _plan_orbit(self, start_pos):
-        """Anello che contiene il volume + tratto di collegamento dalla posizione attuale."""
+        """Ring enclosing the volume + connector segment from the current position."""
         (x_min, x_max), (y_min, y_max), (z_min, z_max) = self.explore_bounds
         self._z_low = z_min + 1.0
         self._z_high = z_max - self.top_clearance
         if self._z_high <= self._z_low or self.explore_velocity <= 0.0:
             return
 
-        # anello centrato nel volume, raggio = semidiagonale + margine
+        # ring centered on the volume, radius = half diagonal + margin
         self._ring_center = np.array([(x_min + x_max) * 0.5, (y_min + y_max) * 0.5])
         self._ring_radius = 0.5 * np.hypot(x_max - x_min, y_max - y_min) + self.ring_clearance
 
-        # si entra nell'anello nel punto più vicino al follower, alla quota z_low
+        # the ring is entered at the point closest to the follower, at altitude z_low
         self._connector_start = np.asarray(start_pos, dtype=float).copy()
         offset = self._connector_start[:2] - self._ring_center
         self._ring_start_angle = float(np.arctan2(offset[1], offset[0])) if np.linalg.norm(offset) > 1e-6 else 0.0
@@ -108,11 +108,11 @@ class ExploringState:
         self._planned = True
 
     def _orbit_state(self, elapsed):
-        """Velocità e accelerazione sull'anello al tempo `elapsed` dall'ingresso nell'anello."""
+        """Velocity and acceleration on the ring at time `elapsed` since entering the ring."""
         theta_rate = 2.0 * np.pi / self._ring_duration
         theta = self._ring_start_angle + theta_rate * elapsed
 
-        # quota: smoothstep z_low → z_high nella prima metà del giro, ritorno nella seconda
+        # altitude: smoothstep z_low → z_high in the first half of the lap, back in the second
         half = 0.5 * self._ring_duration
         rising = elapsed <= half
         _, sd, sdd = time_law(elapsed if rising else elapsed - half, half)
@@ -125,7 +125,7 @@ class ExploringState:
         return velocity, acceleration
 
     def _yaw_rate_to_center(self, follower_pos, follower_quat):
-        """Yaw rate (P saturato) che punta l'asse ottico della camera sul centro dell'anello."""
+        """Yaw rate (saturated P) that points the camera optical axis at the ring center."""
         to_center = self._ring_center - np.asarray(follower_pos[:2], dtype=float)
         if np.linalg.norm(to_center) < 1e-6:
             return 0.0
@@ -135,9 +135,9 @@ class ExploringState:
 
     def update(self):
         """
-        1. Se il leader è nel FOV → TRACKING (senza stop: il tracking parte dal moto attuale)
-        2. A fine percorso (o senza piano) ferma il drone → IDLE
-        3. Altrimenti manda velocità/accelerazione del collegamento o dell'anello + yaw verso il centro
+        1. If the leader is in the FOV → TRACKING (no stop: tracking starts from the current motion)
+        2. At the end of the path (or without a plan) stops the drone → IDLE
+        3. Otherwise sends velocity/acceleration of the connector or of the ring + yaw towards the center
         """
         leader_pos, _ = self.optitrack_helper(self.leader_body_name)
         follower_pos, follower_quat = self.optitrack_helper(self.follower_body_name)

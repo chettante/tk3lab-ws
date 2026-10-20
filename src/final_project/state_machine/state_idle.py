@@ -1,6 +1,5 @@
 import time
 import logging
-import numpy as np
 from final_project.state_machine.state_machine import StateType
 
 
@@ -20,12 +19,9 @@ class IdleState:
         self.leader_body_name, self.follower_body_name = follower_bodies
         self.enter_time = None
         self.idle_timeout = idle_timeout
-        self.fov_check_count = 0
 
     def update(self):
-        self.fov_check_count += 1
-
-        leader_pos, leader_quat = self.optitrack_helper(self.leader_body_name)
+        leader_pos, _ = self.optitrack_helper(self.leader_body_name)
         follower_pos, follower_quat = self.optitrack_helper(self.follower_body_name)
 
         if leader_pos is None or follower_pos is None:

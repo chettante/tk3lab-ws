@@ -33,9 +33,9 @@ atexit() {
     set +e
 
     kill $pids
-    # gz sim (wrapper ruby) e vglrun non inoltrano il segnale ai processi figli:
-    # senza questo il server Gazebo resta vivo e il run dopo non riesce ad aprire
-    # la porta di optitrack (1509)
+    # gz sim (ruby wrapper) and vglrun do not forward the signal to their children:
+    # without this the Gazebo server stays alive and the next run cannot open
+    # the optitrack port (1509)
     pkill -f "gz sim" 2>/dev/null
     wait
     case $middleware in
@@ -75,7 +75,7 @@ if [ ! -f $gz_world ]; then
     usage
 fi
 
-# allinea FOV e range della camera nel model.sdf a final_project/config.py
+# align the camera FOV and range in model.sdf with final_project/config.py
 python3 "${SCRIPT_DIR}/sync_camera_fov.py"
 
 # start gazebo
@@ -121,7 +121,7 @@ if [ "$intel_gpu" -eq 1 ]; then
     done
 
     # Render the simulation and sensors through EGL on Intel; Xvnc's GUI is separate.
-    echo "GPU Intel disponibile ($intel_render_node): server Gazebo headless su Mesa Iris"
+    echo "Intel GPU available ($intel_render_node): headless Gazebo server on Mesa Iris"
     sudo -n setpriv --reuid="$(id -u)" --regid="$(id -g)" \
         --groups="$gpu_group_ids" env HOME="$(getent passwd "$(id -u)" | cut -d: -f6)" \
         $gazebo_transport_args \
@@ -132,15 +132,15 @@ if [ "$intel_gpu" -eq 1 ]; then
         "$gz_world" & pids="$pids $!"
     env $gazebo_transport_args gz sim -g & pids="$pids $!"
 elif command -v vglrun >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
-    # container avviato con la GPU (tk3lab-run-gpu): tutto il rendering sulla NVIDIA
-    #  - server: fisica + camera del follower renderizzata via EGL, senza display
-    #  - GUI: renderizzata da VirtualGL e copiata nel desktop VNC
-    echo "GPU NVIDIA disponibile: server headless + GUI con VirtualGL"
+    # container started with the GPU (tk3lab-run-gpu): all rendering on the NVIDIA
+    #  - server: physics + follower camera rendered via EGL, without display
+    #  - GUI: rendered by VirtualGL and copied to the VNC desktop
+    echo "NVIDIA GPU available: headless server + GUI with VirtualGL"
     gz sim -s --headless-rendering $gz_world & pids="$pids $!"
     vglrun -d egl gz sim -g & pids="$pids $!"
 else
     # Other supported GPUs can still be selected automatically by Mesa.
-    echo "GPU Intel/NVIDIA dedicata non rilevata: avvio Gazebo con renderer predefinito"
+    echo "No dedicated Intel/NVIDIA GPU detected: starting Gazebo with the default renderer"
     gz sim $gz_world & pids="$pids $!"
 fi
 

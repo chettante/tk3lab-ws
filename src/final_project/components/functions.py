@@ -2,8 +2,7 @@ import genomix
 from genomix.event import GenoMError
 import os
 import random
-import math
-import numpy as np 
+import numpy as np
 from final_project.config import CONFIG, genom_log_path
 
 NHFC_GAINS = CONFIG['nhfc_gains']
@@ -31,9 +30,10 @@ maneuver_f = g.load('maneuver', '-i', 'maneuver_2')
 
 
 
-def setup_f(rotorcraft, pom, nhfc, maneuver,
-              rc_name, pom_name, nhfc_name, maneuver_name,
-              serial, mocap_body):
+# Configure one drone (same setup for leader and follower).
+def setup_drone(rotorcraft, pom, nhfc, maneuver,
+                rc_name, pom_name, nhfc_name, maneuver_name,
+                serial, mocap_body):
   # maneuver reads the current robot state from pom, same source as nhfc
   maneuver.connect_port({
     'local': 'state', 'remote': pom_name + '/frame/robot'
@@ -89,109 +89,7 @@ def setup_f(rotorcraft, pom, nhfc, maneuver,
 
   # PID tuning
   nhfc.set_saturation({'sat': {'x': 1, 'v': 1, 'ix': 0}})
-  nhfc.set_servo_gain({'gain': dict(NHFC_GAINS)})  # copia: genomix svuota il dict che riceve
-
-  # use tilt-prioritized controller
-  nhfc.set_control_mode({'att_mode': '::nhfc::tilt_prioritized'})
-
-  # read measured propeller velocities from rotorcraft
-  nhfc.connect_port({
-    'local': 'rotor_measure', 'remote': rc_name + '/rotor_measure'
-  })
-
-  # read current state from pom
-  nhfc.connect_port({
-    'local': 'state', 'remote': pom_name + '/frame/robot'
-  })
-
-
-  #############################################
-  #                    POM                    #
-  #############################################
-  #
-  # configure kalman filter
-  pom.set_prediction_model('::pom::constant_acceleration')
-  pom.set_process_noise({'max_jerk': 100, 'max_dw': 50})
-
-  # allow sensor data up to 250ms old
-  pom.set_history_length({'history_length': 0.25})
-
-  # configure magnetic field
-  pom.set_mag_field({'magdir': {
-    'x': 23.8e-06, 'y': -0.4e-06, 'z': -39.8e-06
-  }})
-
-  # read IMU and magnetometers from rotorcraft
-  pom.connect_port({'local': 'measure/imu', 'remote': rc_name + '/imu'})
-  pom.add_measurement('imu')
-  pom.connect_port({'local': 'measure/mag', 'remote': rc_name + '/mag'})
-  pom.add_measurement('mag')
-
-  # read position and orientation from optitrack
-  pom.connect_port({
-    'local': 'measure/mocap', 'remote': 'optitrack/bodies/' + mocap_body
-  })
-  pom.add_measurement('mocap')
-
-def setup_l(rotorcraft, pom, nhfc, maneuver,
-              rc_name, pom_name, nhfc_name, maneuver_name,
-              serial, mocap_body):
-  # maneuver reads the current robot state from pom, same source as nhfc
-  maneuver.connect_port({
-    'local': 'state', 'remote': pom_name + '/frame/robot'
-  })
-
-  # configure the free-space bounds within which trajectories can be planned
-  maneuver.set_bounds(dict(CONFIG['maneuver_bounds']))
-
-
-  #############################################
-  #                ROTORCRAFT                 #
-  #############################################
-
-  # connect to the simulated quadrotor
-  rotorcraft.connect({'serial': serial, 'baud': 0})
-
-  # get IMU at 1kHz and motor data at 20Hz
-  rotorcraft.set_sensor_rate({'rate': {
-    'imu': 1000, 'mag': 0, 'motor': 20, 'battery': 1
-  }})
-
-  # Filter IMU: 20Hz cut-off frequency for gyroscopes and 5Hz for
-  # accelerometers. This is important for cancelling vibrations.
-  rotorcraft.set_imu_filter({
-    'gfc': [20, 20, 20], 'afc': [5, 5, 5], 'mfc': [20, 20, 20]
-  })
-
-  # read propellers velocities from nhfc controller
-  rotorcraft.connect_port({
-    'local': 'rotor_input', 'remote': nhfc_name + '/rotor_input'
-  })
-
-
-  #############################################
-  #                   NHFC                    #
-  #############################################
-  #
-  # configure quadrotor geometry: 4 rotors, not tilted, 23cm arms, needed to compute the allocation matrix
-  nhfc.set_gtmrp_geom({
-    'rotors': 4, 'cx': 0, 'cy': 0, 'cz': 0, 'armlen': 0.23, 'mass': 1.28,
-    'rx':0, 'ry': 0, 'rz': -1, 'cf': 6.5e-4, 'ct': 1e-5
-  })
-
-  # emergency descent parameters
-  nhfc.set_emerg({'emerg': {
-    'descent': 0.1, 'dx': 0.5, 'dq': 1, 'dv': 3, 'dw': 3
-  }})
-
-  # read planned trajectory reference from maneuver
-  nhfc.connect_port({
-    'local': 'reference', 'remote': maneuver_name + '/desired'
-  })
-
-  # PID tuning
-  nhfc.set_saturation({'sat': {'x': 1, 'v': 1, 'ix': 0}})
-  nhfc.set_servo_gain({'gain': dict(NHFC_GAINS)})  # copia: genomix svuota il dict che riceve
+  nhfc.set_servo_gain({'gain': dict(NHFC_GAINS)})  # copy: genomix empties the dict it receives
 
   # use tilt-prioritized controller
   nhfc.set_control_mode({'att_mode': '::nhfc::tilt_prioritized'})
@@ -248,14 +146,14 @@ def setup():
   })
 
   # leader
-  setup_l(rotorcraft_l, pom_l, nhfc_l, maneuver_l,
-            'rotorcraft_1', 'pom_1', 'nhfc_1', 'maneuver_1',
-            '/tmp/pty-qr4_leading', 'QR4_leading')
+  setup_drone(rotorcraft_l, pom_l, nhfc_l, maneuver_l,
+              'rotorcraft_1', 'pom_1', 'nhfc_1', 'maneuver_1',
+              '/tmp/pty-qr4_leading', 'QR4_leading')
 
   # follower  (adjust serial device and mocap body name to your setup)
-  setup_f(rotorcraft_f, pom_f, nhfc_f, maneuver_f,
-            'rotorcraft_2', 'pom_2', 'nhfc_2', 'maneuver_2',
-            '/tmp/pty-qr4_following', 'QR4_following')
+  setup_drone(rotorcraft_f, pom_f, nhfc_f, maneuver_f,
+              'rotorcraft_2', 'pom_2', 'nhfc_2', 'maneuver_2',
+              '/tmp/pty-qr4_following', 'QR4_following')
 
 
 # --- start ----------------------------------------------------------------
@@ -271,11 +169,10 @@ def start_one(rotorcraft, pom, nhfc, maneuver, tag):
   rotorcraft.servo(ack=True) # this runs until stopped or input error
 
   nhfc.log(genom_log_path('nhfc_%s.log' % tag))
-  #nhfc.set_current_position() # hover on current position
   nhfc.servo(ack=True)       # start nhfc's own control loop (reads state+reference, drives rotor_input)
 
   maneuver.log(genom_log_path('maneuver_%s.log' % tag))
-  maneuver.set_current_state() # this runs until stopped or input error
+  maneuver.set_current_state() # initialize the planner from the current pom state (returns immediately)
 
 
 # Spin the motors and servo on current position. To be called interactively
@@ -312,14 +209,14 @@ def stop():
 def random_trajectory(n_points, start, speed, z_range=(2.0, 6.0), xy_range=10.0,
                       maneuver=None, min_segment=2.0, max_retries=8):
   """
-  Accoda in maneuver (default maneuver_l) n_points waypoint casuali più un punto
-  finale fermo, tutti con quota in z_range (il leader non scende mai sotto z_min).
-  - durata di ogni tratto = distanza / speed (almeno min_segment s):
-    velocità media ≈ speed, indipendente da quanto sono lontani i punti
-  - velocità di passaggio sui waypoint = speed lungo la tangente di Catmull-Rom
-    (direzione precedente → successivo), così il moto è fluido; sul punto finale 0
-  Se maneuver rifiuta un tratto per i limiti (e_limits), la sua durata viene allungata.
-  Ritorna la durata totale [s].
+  Queues in maneuver (default maneuver_l) n_points random waypoints plus a final
+  point at rest, all with altitude in z_range (the leader never goes below z_min).
+  - duration of each segment = distance / speed (at least min_segment s):
+    average velocity ≈ speed, regardless of how far apart the points are
+  - velocity when passing a waypoint = speed along the Catmull-Rom tangent
+    (previous → next direction), so the motion is smooth; 0 on the final point
+  If maneuver rejects a segment because of the limits (e_limits), its duration is extended.
+  Returns the total duration [s].
   """
   maneuver = maneuver_l if maneuver is None else maneuver
   z_min, z_max = z_range
@@ -338,10 +235,10 @@ def random_trajectory(n_points, start, speed, z_range=(2.0, 6.0), xy_range=10.0,
       tangent = pts[i + 1] - pts[i - 1]
       v = speed * tangent / max(np.linalg.norm(tangent), 1e-6)
     else:
-      v = np.zeros(3)                       # punto finale: fermo
-    # maneuver rifiuta (e_limits) un tratto che con questa durata violerebbe i limiti di
-    # velocità/accelerazione del leader: si riprova allungandolo, al limite duration=0
-    # (il più veloce possibile entro i limiti)
+      v = np.zeros(3)                       # final point: at rest
+    # maneuver rejects (e_limits) a segment that, with this duration, would violate the
+    # leader velocity/acceleration limits: retry with a longer one, at worst duration=0
+    # (as fast as possible within the limits)
     for _ in range(max_retries):
       try:
         maneuver.waypoint({
@@ -362,56 +259,16 @@ def random_trajectory(n_points, start, speed, z_range=(2.0, 6.0), xy_range=10.0,
         'vx': v[0], 'vy': v[1], 'vz': v[2], 'wz': 0,
         'ax': 0, 'ay': 0, 'az': 0
       })
-      duration = np.linalg.norm(pts[i] - pts[i - 1]) / speed   # stima per max_loops
+      duration = np.linalg.norm(pts[i] - pts[i - 1]) / speed   # estimate for max_loops
     total += duration
   return total
 
 
-def compute_follower_target_3d(P_leader, P_follower, step):
-  dx = P_leader['x'] - P_follower['x']
-  dy = P_leader['y'] - P_follower['y']
-  dz = P_leader['z'] - P_follower['z']
-  dist = math.sqrt(dx**2 + dy**2 + dz**2)
-
-  if dist == 0:
-    return P_follower  # leader e follower coincidono
-
-  ux, uy, uz = dx / dist, dy / dist, dz / dist
-  s_eff = min(step, dist)  # non superare il leader
-
-  target = (P_follower['x'] + s_eff * ux,
-            P_follower['y'] + s_eff * uy,
-            P_follower['z'] + s_eff * uz)
-  return target
-
-def compute_follower_velocity_target_3d(P_leader, P_follower, vmax):
-  dx = P_leader['x'] - P_follower['x']
-  dy = P_leader['y'] - P_follower['y']
-  dz = P_leader['z'] - P_follower['z']
-  dist = math.sqrt(dx**2 + dy**2 + dz**2)
-
-  if dist == 0:
-      return P_follower  # leader e follower coincidono
-  
-  ux, uy, uz = dx / dist, dy / dist, dz / dist
-  target = (vmax * ux, 
-            vmax * uy, 
-            vmax * uz)
-  return target
-
 def _quat_to_yaw(quat):
-  """Converte quaternione a yaw"""
+  """Converts a quaternion (qw, qx, qy, qz) to yaw."""
   qw, qx, qy, qz = quat
   yaw = np.arctan2(
     2 * (qw * qz + qx * qy),
     1 - 2 * (qy**2 + qz**2)
   )
   return yaw
-
-## interactively, one can start the simulation with
-# setup()
-# start()
-## and then for instance set a desired position with
-# nhfc.set_position(0, 0, 1, 0)
-## to stop, use
-# stop

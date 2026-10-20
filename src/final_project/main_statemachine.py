@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Main script con state machine: IDLE → TRACKING → SEARCHING.
+Main script with state machine: IDLE → EXPLORING → TRACKING → SEARCHING.
 
-Orchestrazione:
-1. Setup di GenoM3 e droni
-2. Inizializzazione state machine
-3. Main loop con cicli di update della state machine
+Orchestration:
+1. GenoM3 and drone setup
+2. State machine initialization
+3. Main loop running the state machine update cycles
 4. Cleanup
 """
 
@@ -14,7 +14,6 @@ import sys
 import time
 import logging
 import numpy as np
-import signal
 
 # Allow direct execution from the project folder: python3 main_statemachine.py
 if __package__ in (None, ""):
@@ -24,19 +23,21 @@ if __package__ in (None, ""):
         sys.path.insert(0, src_root)
 
 # Import config and core modules
-from final_project.components.functions import *
-from final_project.components.functions import _quat_to_yaw
+from final_project.components.functions import (
+    setup, start, stop, random_trajectory, _quat_to_yaw,
+    optitrack, pom_l, pom_f, maneuver_l, maneuver_f,
+)
 from final_project.components.camera import FOVPyramid, TrackingController
 from final_project.components.velocity_estimator import VelocityEstimator
 from final_project.components.optitrack_helper import create_optitrack_reader
-from final_project.state_machine.state_machine import StateMachine, StateType
+from final_project.state_machine.state_machine import StateMachine
 from final_project.state_machine.state_idle import IdleState
 from final_project.state_machine.state_tracking import TrackingState
 from final_project.state_machine.state_searching import SearchingState
 from final_project.state_machine.state_exploring import ExploringState
-from final_project.components.trajectory_handler import *
+from final_project.components.trajectory_handler import TrajectoryHandler
 from final_project.config import CONFIG, config_path
-from final_project.components.Research import *
+from final_project.components.Research import LeaderSearchManeuver
 from final_project.graphics.trajectory_plotter import plot_trajectory
 
 # Setup logging
@@ -48,14 +49,14 @@ logger = logging.getLogger("MainControl")
 
 
 def save_real_follower_path(path_points, period, filename=None):
-    """Funzione temporanea per salvare il percorso reale del follower."""
+    """Temporary function to save the actual follower path."""
     if not path_points:
-        logger.warning("[TEMP] Nessun percorso del follower da plottare.")
+        logger.warning("[TEMP] No follower path to plot.")
         return
 
     out_file = filename or config_path('plot_real_trajectory')
     plot_trajectory(path_points, dt=period, filename=out_file, show=False)
-    logger.info(f"[TEMP] Percorso reale del follower salvato in {out_file}")
+    logger.info(f"[TEMP] Actual follower path saved to {out_file}")
 
 
 # ============================================================================
@@ -66,7 +67,7 @@ def main():
 
     # ===== SETUP =====
     logger.info("[*] Setting up GenoM3 components...")
-    
+
     setup()
 
     logger.info("[*] Starting motors and servo...")
@@ -88,7 +89,7 @@ def main():
     # Velocity estimator
     vel_estimator = VelocityEstimator()
 
-    # accelerazione del tracking dal budget di inclinazione: a = g·tan(tilt)
+    # tracking acceleration from the tilt budget: a = g·tan(tilt)
     tracking_acc = 9.81 * np.tan(np.radians(CONFIG['tracking_max_tilt_deg']))
 
     # Tracking controller
@@ -100,17 +101,16 @@ def main():
     follow_distance=CONFIG['tracking_follow_distance'],
     cmd_acc_max=tracking_acc,
     yaw_priority_start_deg=CONFIG['tracking_yaw_priority_start_deg'],
-    yaw_priority_end_deg=CONFIG['fov_half_angle_h_deg'],   # fine priorità = bordo del FOV
+    yaw_priority_end_deg=CONFIG['fov_half_angle_h_deg'],   # priority ends at the FOV edge
     vprio_start_deg=CONFIG['tracking_vprio_start_deg'],
-    vprio_end_deg=CONFIG['fov_half_angle_v_deg'],           # fine priorità verticale = bordo del FOV
+    vprio_end_deg=CONFIG['fov_half_angle_v_deg'],           # vertical priority ends at the FOV edge
     max_velocity=CONFIG['follower_max_velocity'],
     yaw_rate_max=CONFIG['max_yaw_rate'],
     )
 
-    #Research Strategy
-      
+    # Search strategy
     search = LeaderSearchManeuver(
-           # valori iniziali neutri: il piano viene ricalcolato in SearchingState.enter()
+           # neutral initial values: the plan is recomputed in SearchingState.update()
            p_follower0=np.zeros(3), yaw0=0.0, p_leader_last=CONFIG['leader_start_pos'],
            v_leader_last=np.zeros(3), dt=CONFIG['control_loop_period'],
            v_max=CONFIG['follower_max_velocity'], v_scan=CONFIG['search_v_scan'],
@@ -120,7 +120,7 @@ def main():
            T_rec=CONFIG['search_T_rec'], approach_dist=CONFIG['search_approach_dist'],
            z_min=CONFIG['search_z_min'], z_max=CONFIG['search_z_max'], p_home=CONFIG['search_home'],
        )
-    
+
 
     # OptiTrack reader
     optitrack_reader = create_optitrack_reader(optitrack)
@@ -129,7 +129,7 @@ def main():
 
     follower_bodies = (CONFIG['leader_body'], CONFIG['follower_body'])
 
-    # Registra i tre stati
+    # Create the four states
     idle_state = IdleState(
         camera=camera,
         optitrack_helper=optitrack_reader,
@@ -191,23 +191,23 @@ def main():
                 f"{tracking_acc:.2f} m/s² (tilt {CONFIG['tracking_max_tilt_deg']}°)")
     logger.info(f"  Max yaw rate (both): {CONFIG['max_yaw_rate']} rad/s")
 
-    # coerenza dei limiti
+    # consistency of the limits
     if CONFIG['leader_speed'] > CONFIG['leader_max_velocity']:
         logger.warning(f"  leader_speed={CONFIG['leader_speed']} m/s > leader_max_velocity="
-                       f"{CONFIG['leader_max_velocity']} m/s: il leader non seguirà la traiettoria")
+                       f"{CONFIG['leader_max_velocity']} m/s: the leader will not follow the trajectory")
     if CONFIG['follower_max_velocity'] < 1.3 * CONFIG['leader_speed']:
         logger.warning(f"  follower_max_velocity={CONFIG['follower_max_velocity']} m/s < 1.3·leader_speed: "
-                       "il follower ha poco margine per recuperare il leader")
+                       "the follower has little margin to catch up with the leader")
     if tracking_acc < 1.2 * CONFIG['leader_max_acc']:
-        logger.warning(f"  accelerazione di tracking {tracking_acc:.2f} m/s² < 1.2·leader_max_acc: "
-                       "il follower accelera meno del leader (aumenta tracking_max_tilt_deg)")
+        logger.warning(f"  tracking acceleration {tracking_acc:.2f} m/s² < 1.2·leader_max_acc: "
+                       "the follower accelerates less than the leader (increase tracking_max_tilt_deg)")
     if CONFIG['tracking_max_tilt_deg'] > CONFIG['fov_half_angle_v_deg'] / 2:
-        logger.warning(f"  tracking_max_tilt_deg={CONFIG['tracking_max_tilt_deg']}° > metà del FOV "
-                       "verticale: l'inclinazione può far uscire il leader dall'inquadratura")
+        logger.warning(f"  tracking_max_tilt_deg={CONFIG['tracking_max_tilt_deg']}° > half of the vertical "
+                       "FOV: the tilt can push the leader out of the frame")
 
     PERIOD = CONFIG['control_loop_period']
 
-    
+
 
     # select the trajectory for the leader
     th = TrajectoryHandler.from_speed(
@@ -216,7 +216,7 @@ def main():
         A=CONFIG['traj_A'],
         B=CONFIG['traj_B'],
         H=CONFIG['traj_H'],
-        P0=np.array(CONFIG['leader_start_pos'], dtype=float),   # l'otto parte da dove decolla il leader
+        P0=np.array(CONFIG['leader_start_pos'], dtype=float),   # the figure-8 starts where the leader takes off
         position_reader=optitrack_reader,
         leader_body_name=CONFIG['leader_body'],
     )
@@ -227,13 +227,14 @@ def main():
     pom_f.log_state(config_path('pom_follower_log'))
     loop_count = 0
     follower_path = []
-    # decollo: leader su leader_start_pos, follower in verticale sullo spawn (stesso yaw)
+    # takeoff: leader to leader_start_pos, follower straight up above its spawn (same yaw)
     pf, qf = optitrack_reader(CONFIG['follower_body'])
     targets = {CONFIG['leader_body']: np.array(CONFIG['leader_start_pos'], dtype=float),
                CONFIG['follower_body']: np.array([pf[0], pf[1], CONFIG['follower_takeoff_z']])}
     maneuver_f.goto(*targets[CONFIG['follower_body']], _quat_to_yaw(qf), 0, ack=True)
-    maneuver_l.goto(*targets[CONFIG['leader_body']], CONFIG['leader_start_yaw'], 0)   # durata 0 = il più veloce possibile
-    # goto può ritornare prima che i droni siano arrivati: si aspetta la posizione reale, poi hover
+    maneuver_l.goto(*targets[CONFIG['leader_body']], CONFIG['leader_start_yaw'], 0)   # duration 0 = as fast as possible
+    # the follower goto (ack=True) returns before the drone has arrived (the leader one blocks):
+    # wait for the actual positions, then hover
     t_end = time.monotonic() + CONFIG['leader_takeoff_timeout']
     while time.monotonic() < t_end:
         ps = [optitrack_reader(b)[0] for b in targets]
@@ -244,7 +245,7 @@ def main():
     time.sleep(CONFIG['leader_takeoff_hold'])
 
     if random_traj:
-        # accoda i waypoint in maneuver_l: vengono eseguiti da maneuver, senza comandi dal loop
+        # queue the waypoints in maneuver_l: maneuver executes them, without commands from the loop
         traj_time = random_trajectory(
             CONFIG['random_traj_points'], start=CONFIG['leader_start_pos'],
             speed=CONFIG['leader_speed'], z_range=CONFIG['random_traj_z_range'],
@@ -253,7 +254,7 @@ def main():
     else:
         traj_time = th.duration
 
-    # il loop dura quanto la traiettoria del leader + una coda finale
+    # the loop lasts as long as the leader trajectory + a final tail
     max_loops = int(np.ceil((traj_time + CONFIG['traj_tail_time']) / PERIOD))
 
     # ===== MAIN CONTROL LOOP =====
@@ -272,23 +273,20 @@ def main():
 
     try:
         while loop_count < max_loops:
-            #nhfc_f.servo(ack=True)
-            #nhfc_l.servo(ack=True)
-            # Aggiorna la traiettoria del leader (solo per l'otto)
+            # Update the leader trajectory (figure-8 only)
             if not random_traj:
                 th.update_trajectory(maneuver_l)
 
-            # Esegui ciclo di update della state machine
-            current_state = sm.get_current_state()
+            # Run one state machine update cycle
             sm.update()
 
             follower_pos, _ = optitrack_reader(CONFIG['follower_body'])
             if follower_pos is not None:
                 follower_path.append(tuple(np.asarray(follower_pos, dtype=float)))
 
-            # Log dello stato ogni N cicli
+            # Log the state every N cycles
             if loop_count % 100 == 0:
-                logger.debug(f"[Loop {loop_count:04d}] State: {current_state.value}")
+                logger.debug(f"[Loop {loop_count:04d}] State: {sm.get_current_state().value}")
 
             # Rate limiting
             next_t += PERIOD
@@ -300,20 +298,14 @@ def main():
 
             loop_count += 1
     finally:
-        # anche in caso di eccezione: ferma i droni e chiudi i log
-        logger.info(f"[*] Loop terminato dopo {loop_count} cicli, stop dei droni")
+        # also on exceptions: stop the drones and close the logs
+        logger.info(f"[*] Loop ended after {loop_count} cycles, stopping the drones")
         stop()
 
     save_real_follower_path(follower_path, PERIOD, config_path('plot_real_trajectory'))
 
-    if not random_traj:     # con i waypoint casuali non c'è una traiettoria pianificata da plottare
-        #th.plot_trajectories(
-            planned_path=config_path('plot_planned_trajectory'),
-            real_path=config_path('plot_real_trajectory'),
-            show=CONFIG['show_plots'],
-        #)
     logger.info("[+] Drone chase control finished")
-    
+
 
 
 if __name__ == "__main__":
