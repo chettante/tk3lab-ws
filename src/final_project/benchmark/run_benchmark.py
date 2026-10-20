@@ -65,7 +65,8 @@ def run_once(sc, run_dir, args):
     ov_path = os.path.join(run_dir, 'overrides.json')
     with open(ov_path, 'w') as f:
         json.dump(overrides, f, indent=2)
-    env = dict(os.environ, DRONE_CHASE_OVERRIDES=ov_path, MPLBACKEND='Agg')
+    # GZ_AUTORUN: Gazebo starts unpaused (nobody presses Play)
+    env = dict(os.environ, DRONE_CHASE_OVERRIDES=ov_path, MPLBACKEND='Agg', GZ_AUTORUN='1')
 
     with open(os.path.join(run_dir, 'sim.log'), 'w') as sim_log:
         sim = subprocess.Popen(args.sim_cmd.split(), env=env, stdout=sim_log,
