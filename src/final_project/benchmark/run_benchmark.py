@@ -83,6 +83,14 @@ def start_sim(spawn, log_path, max_wait):
     raise RuntimeError(f'simulation not ready after {max_wait:.0f}s, see {log_path}')
 
 
+def sim_log_path(out, spawn):
+    """results/<campaign>/sim_<spawn>_<n>.log, a new file for every Gazebo start."""
+    n = 1
+    while os.path.exists(os.path.join(out, f'sim_{spawn}_{n}.log')):
+        n += 1
+    return os.path.join(out, f'sim_{spawn}_{n}.log')
+
+
 def stop_sim(proc):
     """Ctrl+C to the simulation (its trap kills components, Gazebo and h2), then force."""
     if proc is None:
@@ -215,18 +223,21 @@ def main():
             if spawn != sim_spawn:                           # spawn changed: Gazebo must restart
                 stop_sim(sim)
                 print(f'Starting Gazebo (follower spawn {spawn}) ...', flush=True)
-                sim = start_sim(spawn, os.path.join(out, f'sim_{spawn}.log'), args.sim_startup)
+                sim = start_sim(spawn, sim_log_path(out, spawn), args.sim_startup)
                 sim_spawn = spawn
 
             print(f'[{i}/{len(todo)}] {sc["id"]} {sc["label"]} ...', end=' ', flush=True)
             restart_and_play(world, args.settle)
             rc, duration = run_main(sc, run_dir, args)
             if rc != 0 and duration < 30:
-                # the main did not even reach the takeoff: Restart + Play again and retry once
-                for name in ('main.log',):
-                    os.replace(os.path.join(run_dir, name), os.path.join(run_dir, 'failed_' + name))
-                print(f'failed after {duration:.0f}s (rc={rc}), retrying ...', end=' ', flush=True)
-                restart_and_play(world, 3 * args.settle)
+                # the main did not even reach the takeoff: fresh Gazebo + components, retry once
+                os.replace(os.path.join(run_dir, 'main.log'), os.path.join(run_dir, 'failed_main.log'))
+                print(f'failed after {duration:.0f}s (rc={rc}), restarting Gazebo and retrying ...',
+                      end=' ', flush=True)
+                if not args.sim_running:
+                    stop_sim(sim)
+                    sim = start_sim(spawn, sim_log_path(out, spawn), args.sim_startup)
+                restart_and_play(world, args.settle)
                 rc, duration = run_main(sc, run_dir, args)
 
             ok = rc == 0 and os.path.isfile(os.path.join(run_dir, 'log', 'pom.log'))
@@ -235,6 +246,13 @@ def main():
             text = open(os.path.join(run_dir, 'main.log'), errors='replace').read()
             events = ', '.join(f'{k} {text.count(v)}' for k, v in EVENTS.items())
             print(f'{"ok" if ok else "FAILED"} ({duration:.0f}s) - {events}', flush=True)
+            if not ok and not args.sim_running:
+                # a run that hangs or fails can leave a GenoM3 component stuck (a World Restart does
+                # not fix it): the next run starts with a fresh Gazebo and fresh components
+                sim_spawn = None
+            elif not ok:
+                print('  the run failed: restart Gazebo by hand before continuing (--resume)')
+                break
     except KeyboardInterrupt:
         print('\nInterrupted: stopping Gazebo and its components (wait, do not press Ctrl+C again) ...')
     finally:

@@ -37,11 +37,12 @@ python3 analyze_benchmark.py results/c1
 - `--phase A B` or `--only D21 D22` run a subset; `--resume` skips the runs already completed.
 - `--sim-running near` (or `far`) uses Gazebo already started by hand with that follower spawn:
   only the matching scenarios are run and Gazebo is never restarted.
-- If the main fails within 30 s, the runner does Restart + Play again and retries once; the log of
-  the failed attempt is kept as `failed_main.log`.
+- If the main fails within 30 s, the runner restarts Gazebo and the components and retries once;
+  the log of the failed attempt is kept as `failed_main.log`. After any failed run (also a timeout)
+  the next run starts with a fresh Gazebo, because a stuck GenoM3 component survives a World Restart.
 - After each scenario the runner prints the state transitions (`tracking 1, lost 0, ...`): with the
   `near` spawn (phases A-D) `exploring` must be 0.
 - Each run is in `results/<campaign>/<id>/`: `main.log`, `log/pom*.log`, `overrides.json`,
-  `status.json`; the Gazebo output is in `results/<campaign>/sim_<spawn>.log`.
+  `status.json`; the Gazebo output is in `results/<campaign>/sim_<spawn>_<n>.log` (one per Gazebo start).
 - The report is in `results/<campaign>/report/`: `summary.csv`, `summary.md`, `phase_*.png`,
   `runs/<id>.png` (the `tracking_plotter.py` figure of each run). `results/` is not committed.

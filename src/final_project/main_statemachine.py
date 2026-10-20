@@ -234,6 +234,14 @@ def main():
         logger.warning(f"  tracking_max_tilt_deg={tilt}° >= tracking_vprio_start_deg="
                        f"{CONFIG['tracking_vprio_start_deg']}°: at full acceleration the approach is cut "
                        "even with the leader at the same altitude")
+    # exploration ring (same radius as ExploringState): centripetal acceleration vs follower limit
+    (x0, x1), (y0, y1), _ = CONFIG['explore_bounds']
+    ring_r = 0.5 * np.hypot(x1 - x0, y1 - y0) + CONFIG['explore_ring_clearance']
+    ring_acc = CONFIG['exploring_velocity'] ** 2 / ring_r
+    if ring_acc > 0.7 * CONFIG['follower_max_acc']:
+        logger.warning(f"  exploring_velocity={CONFIG['exploring_velocity']} m/s on the {ring_r:.1f} m ring "
+                       f"needs {ring_acc:.1f} m/s², too close to follower_max_acc="
+                       f"{CONFIG['follower_max_acc']} m/s²: the follower maneuver planner can fail")
 
     pom_l.log_state(config_path('pom_leader_log'))
     pom_f.log_state(config_path('pom_follower_log'))

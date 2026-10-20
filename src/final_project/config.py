@@ -59,7 +59,10 @@ CONFIG = {
     # State machine timeouts
     # ------------------------------------------------------------------
     'idle_timeout': 5.0,
-    'exploring_velocity': 10.0,
+    # m/s, velocity along the exploration ring (radius ≈ 15 m with explore_bounds): its centripetal
+    # acceleration v²/r must stay well below follower_max_acc, otherwise the maneuver planner of the
+    # follower gets an infeasible target and stops working (10 m/s -> 6.6 m/s² > 6 m/s²)
+    'exploring_velocity': 7.0,
     'exploring_yaw_rate': 2.0,
     'exploring_acc_max': 1.5,       # m/s², peak acceleration of the connector segment to the ring
     'explore_bounds': ((-10.0, 10.0), (-10.0, 10.0), (5.0, 15.0)),
