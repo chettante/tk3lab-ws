@@ -131,10 +131,7 @@ CONFIG = {
     'follower_takeoff_z': 5.0,
     'leader_takeoff_tol': 0.15,             # m, distance from the takeoff target (both drones)
                                             # and from the last random waypoint (end of the trajectory)
-    # flight back to the start positions between two runs (benchmark): the follower first climbs
-    # to reposition_z, above any leader trajectory, then moves over its start point and descends
-    'reposition_z': 13.0,                   # m
-    'reposition_timeout': 30.0,             # s, for each leg of the flight to the start positions
+    'leader_takeoff_timeout': 5.0,         # s, after this the run starts anyway
     'leader_takeoff_hold': 1.0,             # s, hover on leader_start_pos before the trajectory
 
     # leader trajectory:

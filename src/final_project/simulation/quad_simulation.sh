@@ -78,8 +78,7 @@ fi
 # align the camera FOV and range in model.sdf with final_project/config.py
 python3 "${SCRIPT_DIR}/sync_camera_fov.py"
 
-# start gazebo (GZ_AUTORUN=1 starts the simulation already running, as run_benchmark.py needs)
-gz_run=${GZ_AUTORUN:+-r}
+# start gazebo
 gazebo_partition=${GZ_PARTITION:-tk3lab}
 gazebo_ip=${GZ_IP:-$(hostname -I | awk '{print $1}')}
 gazebo_transport_args="GZ_PARTITION=$gazebo_partition GZ_IP=$gazebo_ip USER=$(id -un) LOGNAME=$(id -un)"
@@ -137,12 +136,12 @@ elif command -v vglrun >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
     #  - server: physics + follower camera rendered via EGL, without display
     #  - GUI: rendered by VirtualGL and copied to the VNC desktop
     echo "NVIDIA GPU available: headless server + GUI with VirtualGL"
-    gz sim -s $gz_run --headless-rendering $gz_world & pids="$pids $!"
+    gz sim -s --headless-rendering $gz_world & pids="$pids $!"
     vglrun -d egl gz sim -g & pids="$pids $!"
 else
     # Other supported GPUs can still be selected automatically by Mesa.
     echo "No dedicated Intel/NVIDIA GPU detected: starting Gazebo with the default renderer"
-    gz sim $gz_run $gz_world & pids="$pids $!"
+    gz sim $gz_world & pids="$pids $!"
 fi
 
 # Wait for ctrl-C or an explicit termination signal. A CHLD trap would run the

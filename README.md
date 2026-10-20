@@ -213,8 +213,9 @@ Python dependencies besides `genomix`: `numpy` and `matplotlib`
 
 ### Benchmark
 
-`benchmark/run_benchmark.py` runs a whole campaign of scenarios unattended, starting and stopping
-the simulation for each run (do not start it by hand), and `benchmark/analyze_benchmark.py` turns
+`benchmark/run_benchmark.py` runs a whole campaign of scenarios unattended, as you would by hand:
+Restart + Play in Gazebo, then the main with the scenario config (Gazebo is started by the runner
+and restarted only when the follower spawn changes), and `benchmark/analyze_benchmark.py` turns
 the logs into a metrics table and comparison plots. See `src/final_project/benchmark/README.md`.
 
 ---

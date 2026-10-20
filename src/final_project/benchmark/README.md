@@ -17,12 +17,15 @@ Leader levels (maneuver limits): 1 = 5 m/s, 1.5 m/s² · 2 = 8 m/s, 3 m/s² ·
 
 ## Running
 
-Inside the tk3lab container. The runner starts **one** simulation for the whole campaign
-(`simulation/quad_simulation.sh`, Gazebo unpaused): the drones take off once and between two
-scenarios they fly back to the start positions, the follower first climbing to `reposition_z`
-so it never crosses the leader. Also the follower spawn (`near` / `far`) is reached in flight,
-so Gazebo never needs a restart. The simulation is restarted only if the drones cannot reach the
-start any more (e.g. after a crash), and every scenario is tried at most twice.
+The runner does what you do by hand when testing, without touching `config.py`:
+
+1. starts Gazebo (`simulation/quad_simulation.sh`) - only once for all the `near` scenarios and
+   once for the `far` ones, because the follower spawn is read by Gazebo at startup;
+2. before every run: **Restart** (world reset) and **Play**, sent with `gz service` to
+   `/world/mrsim/control` as the Gazebo buttons do;
+3. runs `main_statemachine.py` with the config of the scenario (a JSON file named by
+   `DRONE_CHASE_OVERRIDES`, applied at the end of `config.py`);
+4. lets it finish, or sends Ctrl+C after `--timeout` seconds.
 
 ```sh
 cd ~/tk3lab-ws/src/final_project/benchmark
@@ -32,11 +35,13 @@ python3 analyze_benchmark.py results/c1
 ```
 
 - `--phase A B` or `--only D21 D22` run a subset; `--resume` skips the runs already completed.
-- `--sim-running` uses a simulation you started by hand (`sh quad_simulation.sh`, press Play):
-  nothing is restarted, so if the drones crash the runner stops and you restart it with `--resume`.
+- `--sim-running near` (or `far`) uses Gazebo already started by hand with that follower spawn:
+  only the matching scenarios are run and Gazebo is never restarted.
+- If the main fails within 30 s, the runner does Restart + Play again and retries once; the log of
+  the failed attempt is kept as `failed_main.log`.
 - After each scenario the runner prints the state transitions (`tracking 1, lost 0, ...`): with the
   `near` spawn (phases A-D) `exploring` must be 0.
 - Each run is in `results/<campaign>/<id>/`: `main.log`, `log/pom*.log`, `overrides.json`,
-  `status.json`; the simulation output is in `results/<campaign>/sim_<n>.log`.
+  `status.json`; the Gazebo output is in `results/<campaign>/sim_<spawn>.log`.
 - The report is in `results/<campaign>/report/`: `summary.csv`, `summary.md`, `phase_*.png`,
   `runs/<id>.png` (the `tracking_plotter.py` figure of each run). `results/` is not committed.
