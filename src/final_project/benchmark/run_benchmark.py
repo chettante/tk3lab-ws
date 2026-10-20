@@ -31,7 +31,10 @@ from final_project.benchmark.scenarios import SCENARIOS    # noqa: E402
 
 SIM_SCRIPT = os.path.join(PROJECT, 'simulation', 'quad_simulation.sh')
 MAIN = os.path.join(PROJECT, 'main_statemachine.py')
-TMP = '/tmp/bm'                     # short paths: GenoM accepts log paths of at most 64 characters
+TMP = '/tmp/bm'
+# state transitions counted in main.log, printed after each run as a quick check
+EVENTS = {'tracking': 'Transitioning to TRACKING', 'lost': 'transitioning to SEARCHING',
+          'reacquired': 'Leader re-acquired', 'exploring': 'Transitioning to EXPLORING'}                     # short paths: GenoM accepts log paths of at most 64 characters
 
 
 def stop_sim(proc):
@@ -131,7 +134,10 @@ def main():
         ok = rc == 0 and os.path.isfile(os.path.join(run_dir, 'log', 'pom.log'))
         with open(status_path, 'w') as f:
             json.dump({'ok': ok, 'returncode': rc, 'main_duration_s': round(duration, 1)}, f)
-        print(f'{"ok" if ok else "FAILED"} ({duration:.0f}s)')
+        log_path = os.path.join(run_dir, 'main.log')
+        text = open(log_path, errors='replace').read() if os.path.isfile(log_path) else ''
+        events = ', '.join(f'{k} {text.count(v)}' for k, v in EVENTS.items())
+        print(f'{"ok" if ok else "FAILED"} ({duration:.0f}s) - {events}')
 
     print(f'Done. Analysis: python3 {os.path.join(HERE, "analyze_benchmark.py")} {out}')
 

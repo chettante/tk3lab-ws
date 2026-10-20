@@ -175,7 +175,6 @@ def main():
 
     # State Machine
     sm = StateMachine(idle_state)
-    idle_state.enter_time = time.time()
     sm.idle_state = idle_state
     sm.tracking_state = tracking_state
     sm.searching_state = searching_state
@@ -281,6 +280,8 @@ def main():
     logger.info(f"     Leader trajectory: '{kind}', about {traj_time:.0f}s, "
                 f"tail {CONFIG['traj_tail_time']}s, at most {max_loops} loops")
     logger.info("=" * 80)
+    # the IDLE timeout starts now, not before the takeoff (which can last longer than idle_timeout)
+    idle_state.enter_time = time.time()
     next_t = time.monotonic()
 
     try:

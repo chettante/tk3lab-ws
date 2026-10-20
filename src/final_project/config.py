@@ -119,7 +119,7 @@ CONFIG = {
     #   'near' = leader in the FOV at spawn: goes straight to TRACKING (tests the controller)
     #   'far'  = leader out of reach: IDLE -> EXPLORING -> ... (tests the exploration)
     'follower_spawn_mode': 'far',
-    'follower_spawn_near_xy': (-3.0, 0.0),
+    'follower_spawn_near_xy': (-6.0, 0.0),  # tracking_follow_distance behind the leader
     'follower_spawn_far_xy': (20.0, 5.0),
 
     # ------------------------------------------------------------------
@@ -127,7 +127,9 @@ CONFIG = {
     # ------------------------------------------------------------------
     'leader_start_pos': (-1.0, 0.0, 5.0),   # initial goto (x, y, z) [m]
     'leader_start_yaw': 0.0,                # rad
-    'follower_takeoff_z': 1.0,              # m, the follower takes off vertically above its spawn together with the leader
+    # m, the follower takes off vertically above its spawn together with the leader. Same altitude
+    # as leader_start_pos: with the 'near' spawn the leader is at the center of the image at the start
+    'follower_takeoff_z': 5.0,
     'leader_takeoff_tol': 0.15,             # m, distance from the takeoff target (both drones)
                                             # and from the last random waypoint (end of the trajectory)
     'leader_takeoff_timeout': 5.0,         # s, after this the run starts anyway
