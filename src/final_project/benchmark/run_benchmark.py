@@ -31,10 +31,34 @@ from final_project.benchmark.scenarios import SCENARIOS    # noqa: E402
 
 SIM_SCRIPT = os.path.join(PROJECT, 'simulation', 'quad_simulation.sh')
 MAIN = os.path.join(PROJECT, 'main_statemachine.py')
-TMP = '/tmp/bm'
+TMP = '/tmp/bm'                     # short paths: GenoM accepts log paths of at most 64 characters
 # state transitions counted in main.log, printed after each run as a quick check
 EVENTS = {'tracking': 'Transitioning to TRACKING', 'lost': 'transitioning to SEARCHING',
-          'reacquired': 'Leader re-acquired', 'exploring': 'Transitioning to EXPLORING'}                     # short paths: GenoM accepts log paths of at most 64 characters
+          'reacquired': 'Leader re-acquired', 'exploring': 'Transitioning to EXPLORING'}
+# the simulation is ready when the 9 GenoM3 components are running and Gazebo has created both drones
+READY_COMPONENTS = 9
+READY_GAZEBO = 'mrsim created /tmp/pty-qr4_following'
+CLEANUP = 'pkill -f "gz sim"; h2 end'
+
+
+def cleanup():
+    """Gazebo and pocolibs devices left by a previous simulation: with them 'h2 init' fails."""
+    subprocess.run(CLEANUP, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def wait_ready(proc, sim_log_path, max_wait, settle):
+    """Waits until sim.log says that components and drones are up. False if the simulation died."""
+    t_end = time.monotonic() + max_wait
+    while time.monotonic() < t_end:
+        if proc.poll() is not None:
+            return False
+        with open(sim_log_path, errors='replace') as f:
+            text = f.read()
+        if text.count('setup and running') >= READY_COMPONENTS and READY_GAZEBO in text:
+            time.sleep(settle)
+            return True
+        time.sleep(0.5)
+    return proc.poll() is None          # not seen in time: try anyway
 
 
 def stop_sim(proc):
@@ -55,8 +79,7 @@ def stop_sim(proc):
     except (ProcessLookupError, subprocess.TimeoutExpired):
         pass
     # after a SIGKILL the trap does not run: clean up what it would have cleaned
-    subprocess.run('pkill -f "gz sim"; h2 end', shell=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    cleanup()
 
 
 def run_once(sc, run_dir, args):
@@ -71,11 +94,15 @@ def run_once(sc, run_dir, args):
     # GZ_AUTORUN: Gazebo starts unpaused (nobody presses Play)
     env = dict(os.environ, DRONE_CHASE_OVERRIDES=ov_path, MPLBACKEND='Agg', GZ_AUTORUN='1')
 
-    with open(os.path.join(run_dir, 'sim.log'), 'w') as sim_log:
+    cleanup()
+    sim_log_path = os.path.join(run_dir, 'sim.log')
+    with open(sim_log_path, 'w') as sim_log:
         sim = subprocess.Popen(args.sim_cmd.split(), env=env, stdout=sim_log,
                                stderr=subprocess.STDOUT, start_new_session=True)
         try:
-            time.sleep(args.sim_startup)
+            t0 = time.monotonic()
+            if not wait_ready(sim, sim_log_path, args.sim_startup, args.settle):
+                return 'sim_died', time.monotonic() - t0
             t0 = time.monotonic()
             with open(os.path.join(run_dir, 'main.log'), 'w') as main_log:
                 try:
@@ -100,8 +127,10 @@ def main():
     ap.add_argument('--phase', nargs='+', help='only these phases (A B C D E)')
     ap.add_argument('--only', nargs='+', help='only these scenario ids')
     ap.add_argument('--resume', action='store_true', help='skip the runs with status ok')
-    ap.add_argument('--sim-startup', type=float, default=20.0,
-                    help='seconds between starting the simulation and running the main')
+    ap.add_argument('--sim-startup', type=float, default=60.0,
+                    help='max seconds to wait for the simulation to be ready')
+    ap.add_argument('--settle', type=float, default=2.0,
+                    help='seconds between simulation ready and starting the main')
     ap.add_argument('--pause', type=float, default=3.0, help='seconds after stopping the simulation')
     ap.add_argument('--timeout', type=float, default=900.0, help='seconds before the main is stopped')
     ap.add_argument('--sim-cmd', default=f'sh {SIM_SCRIPT}', help='command that starts the simulation')
@@ -127,12 +156,12 @@ def main():
         print(f'[{i}/{len(todo)}] {sc["id"]} {sc["label"]} ...', end=' ', flush=True)
         rc, duration = run_once(sc, run_dir, args)
         if rc != 0 and duration < 30:
-            # usually the components were not ready yet: retry once with a longer wait
+            # usually the components were not ready yet: retry once waiting longer after they are up
             print(f'failed after {duration:.0f}s (rc={rc}), retrying ...', end=' ', flush=True)
             for name in ('main.log', 'sim.log'):          # keep the logs of the failed attempt
                 if os.path.isfile(os.path.join(run_dir, name)):
                     os.replace(os.path.join(run_dir, name), os.path.join(run_dir, 'failed_' + name))
-            args_retry = argparse.Namespace(**{**vars(args), 'sim_startup': 2 * args.sim_startup})
+            args_retry = argparse.Namespace(**{**vars(args), 'settle': 3 * args.settle + 5})
             rc, duration = run_once(sc, run_dir, args_retry)
         ok = rc == 0 and os.path.isfile(os.path.join(run_dir, 'log', 'pom.log'))
         with open(status_path, 'w') as f:

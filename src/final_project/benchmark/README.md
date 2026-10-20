@@ -28,8 +28,12 @@ python3 analyze_benchmark.py results/c1
 ```
 
 - `--phase A B` or `--only D21 D22` run a subset; `--resume` skips the runs already completed.
-- `--sim-startup 20` is the wait between starting the simulation and running the main: raise it
-  if the first run fails while connecting to the components (the runner retries once with twice the wait).
+- Before each run the runner cleans up what a previous simulation may have left (`gz sim`, pocolibs
+  devices), then starts the main as soon as `sim.log` shows the 9 components running and both drones
+  created in Gazebo, plus `--settle 2` seconds. If the main fails within 30 s it retries once with a
+  longer settle time; the logs of the failed attempt are kept as `failed_main.log` / `failed_sim.log`.
+- Each run takes about 20 s more than its trajectory: about 3 s of motor start and 6 s of climb to 5 m,
+  1 s of hover, 5 s of final tail, plus the simulation start and stop.
 - Each run is in `results/<campaign>/<id>/`: `main.log`, `sim.log`, `log/pom*.log`, `overrides.json`.
 - The report is in `results/<campaign>/report/`: `summary.csv`, `summary.md`, `phase_*.png`,
   `runs/<id>.png` (the `tracking_plotter.py` figure of each run). `results/` is not committed.
