@@ -133,7 +133,7 @@ class TrackingController:
                  kp_xy=0.3, kp_z=0.6, follow_distance=1.5, cmd_acc_max=1.0,
                  yaw_priority_start_deg=25.0, yaw_priority_end_deg=45.0,
                  vprio_start_deg=18.0, vprio_end_deg=29.0,
-                 max_velocity=2.5, *, yaw_rate_max):
+                 max_velocity=2.5, *, yaw_rate_max, lead_time=0.0):
         self.follower = follower
         # yaw priority: above start the xy correction decreases, at end it is zero
         self.yaw_prio = np.radians([yaw_priority_start_deg, yaw_priority_end_deg])
@@ -145,6 +145,7 @@ class TrackingController:
         self.velocity_estimator = velocity_estimator or VelocityEstimator()
         self.kp = np.array([kp_xy, kp_xy, kp_z])
         self.yaw_rate_max = yaw_rate_max
+        self.lead_time = lead_time               # s, prediction horizon of the leader position
         self.t_prev = None
         self.last_cmd = np.zeros(3)
 
@@ -163,15 +164,20 @@ class TrackingController:
         leader_pos = np.asarray(leader_pos, dtype=float)
         leader_vel = np.zeros(3) if leader_vel is None else np.asarray(leader_vel)
 
-        # desired point: follow_distance behind the leader along the horizontal
-        # follower→leader bearing (same altitude as the leader)
+        # rel = where the leader is now (priorities: what the camera sees);
+        # rel_p = where it will be after lead_time (target point and yaw aim)
         rel = leader_pos - follower_pos
+        rel_p = rel + leader_vel * self.lead_time
         d_xy = np.linalg.norm(rel[:2])
-        if d_xy > 1e-3:
-            u = rel[:2] / d_xy
+
+        # desired point: follow_distance behind the predicted leader along the horizontal
+        # follower→leader bearing (same altitude as the leader)
+        d_p = np.linalg.norm(rel_p[:2])
+        if d_p > 1e-3:
+            u = rel_p[:2] / d_p
         else:                                   # overlapping: back off along the yaw
             u = np.array([np.cos(follower_yaw), np.sin(follower_yaw)])
-        target = leader_pos - self.follow_distance * np.array([u[0], u[1], 0.0])
+        target = follower_pos + rel_p - self.follow_distance * np.array([u[0], u[1], 0.0])
 
         # P + feedforward: v = v_leader + kp·(target − p)
         v_corr = self.kp * (target - follower_pos)
@@ -213,9 +219,10 @@ class TrackingController:
         # can differ a lot from the actual motion and give a FF in the wrong direction
         v_f = self.last_cmd if follower_vel is None else np.asarray(follower_vel)
         rel_v = leader_vel - v_f
-        r2 = max(rel[0]**2 + rel[1]**2, 0.25)
-        bearing_rate = (rel[0]*rel_v[1] - rel[1]*rel_v[0]) / r2
-        yaw_cmd = np.clip(kp_angle * yaw_err + bearing_rate,
+        # aimed at the predicted leader: the camera turns before the leader gets there
+        r2 = max(rel_p[0]**2 + rel_p[1]**2, 0.25)
+        bearing_rate = (rel_p[0]*rel_v[1] - rel_p[1]*rel_v[0]) / r2
+        yaw_cmd = np.clip(kp_angle * camera.get_yaw_error(rel_p, follower_yaw) + bearing_rate,
                           -self.yaw_rate_max, self.yaw_rate_max)
 
         self.last_cmd = v_cmd.copy()

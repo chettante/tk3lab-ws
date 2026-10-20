@@ -41,7 +41,10 @@ CONFIG = {
     # Larger = the bearing turns more slowly (yaw limit v_lat <= max_yaw_rate·d) and a larger
     # height difference fits in the vertical FOV (dz <= d·tan(fov_half_angle_v_deg))
     'tracking_follow_distance': 5.0,
-    'tracking_kp_angle': 1.5,       # 1/s: steady-state yaw lag ≈ bearing rate / kp_angle
+    'tracking_kp_angle': 1.5,
+    # s, the target point and the yaw aim at the leader predicted this far ahead (p + v·t):
+    # compensates finite difference, 20 Hz loop and maneuver response
+    'tracking_lead_time': 0.25,       # 1/s: steady-state yaw lag ≈ bearing rate / kp_angle
     # tracking acceleration as a tilt budget: the camera is rigid, so every degree of
     # follower tilt moves the leader by one degree in the image (at any distance).
     # The main computes a = g·tan(tilt) and uses it for the command rate limiter and, in TRACKING,
@@ -102,8 +105,11 @@ CONFIG = {
     # The follower must be faster: follower_max_velocity ≳ 1.3·leader peak velocity
     'leader_max_velocity': 8.0,      # m/s
     'leader_max_acc': 3.0,           # m/s²
-    'max_yaw_rate': 2.0,            # rad/s, both drones
-    'max_yaw_acc': 2.0,             # rad/s², leader angular acceleration limit
+    # yaw limits, both drones: 3 rad/s ≈ 172°/s (ArduPilot 'medium' 180°/s, DJI Mavic 3 200°/s),
+    # 4 rad/s² ≈ 230°/s² (ArduPilot 'slow' 180, 'medium' 360°/s²); about half of the yaw torque
+    # of the simulated drone at hover
+    'max_yaw_rate': 3.0,            # rad/s
+    'max_yaw_acc': 4.0,             # rad/s²
     # flight volume for the maneuver planner: 400 m x 400 m x 50 m (room for the straight line at 10 m/s)
     'maneuver_bounds': {
         'xmin': -200, 'xmax': 200,
