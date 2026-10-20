@@ -47,6 +47,10 @@ CONFIG = {
     # The main computes a = g·tan(tilt) and uses it for the command rate limiter. 10° ≈ 1.7 m/s², 15° ≈ 2.6 m/s², 20° ≈ 3.6 m/s².
     # Budget: tilt + elevation of the leader (atan(dz/d)) should stay below tracking_vprio_start_deg
     'tracking_max_tilt_deg': 15.0,
+    # m/s², command acceleration across the line of sight and in z: there the tilt is a roll around
+    # the optical axis (the image rotates around the centered leader) or only thrust, so it does not
+    # push the leader out of the frame. Below follower_max_acc to leave margin to maneuver
+    'tracking_lateral_acc': 5.0,
     # yaw priority: the position (xy) correction decreases linearly from 100% at
     # |yaw error| = yaw_priority_start down to 0% at the FOV edge (fov_half_angle_h_deg)
     'tracking_yaw_priority_start_deg': 25.0,

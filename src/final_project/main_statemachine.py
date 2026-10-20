@@ -101,6 +101,7 @@ def main():
     kp_z=CONFIG['tracking_kp_z'],
     follow_distance=CONFIG['tracking_follow_distance'],
     cmd_acc_max=tracking_acc,
+    lateral_acc_max=CONFIG['tracking_lateral_acc'],
     yaw_priority_start_deg=CONFIG['tracking_yaw_priority_start_deg'],
     yaw_priority_end_deg=CONFIG['fov_half_angle_h_deg'],   # priority ends at the FOV edge
     vprio_start_deg=CONFIG['tracking_vprio_start_deg'],

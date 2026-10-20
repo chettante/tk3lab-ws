@@ -56,11 +56,14 @@ class VelocityEstimator:
         position = np.asarray(position, dtype=float)
         current_time = time.time()
 
-        # first measurement or reset: restart from zero
+        # first measurement: velocity 0. Reset (leader back in the FOV): new reference position,
+        # but the last estimate is kept as feedforward until the next sample (0 would make
+        # the follower brake just while it has to catch up)
         if reset or self.old_pos is None:
+            if self.old_pos is None:
+                self.velocity = np.zeros(3)
             self.old_pos = position
             self.last_update_time = current_time
-            self.velocity = np.zeros(3)
             return self.velocity
 
         # OptiTrack sample not updated yet: keep the previous estimate
