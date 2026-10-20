@@ -17,15 +17,7 @@ The code lives in [`src/final_project/`](src/final_project). The other folders o
 
 ### Architecture
 
-```
-            ┌───────────── Python (main_statemachine.py, 20 Hz) ─────────────┐
-            │                                                                 │
- optitrack ─┼─► camera model ──► state machine ──► velocity / yaw-rate cmd ──┼─► maneuver ─► nhfc ─► rotorcraft ─► Gazebo
- (poses)    │   (FOV pyramid)    IDLE / EXPLORING /                          │   (planner)  (flight  (motors)
-            │                    TRACKING / SEARCHING                        │              control)
-            └─────────────────────────────────────────────────────────────────┘
-                                                     pom (state estimator) ◄── IMU + mocap
-```
+![Component architecture](docs/architecture.png)
 
 Each drone has its own `rotorcraft → pom → nhfc → maneuver` chain; `optitrack` is shared.
 Python only **sends commands to `maneuver`** and **reads poses from `optitrack`**; all the other data
@@ -42,6 +34,8 @@ The leader flies one of two trajectories, chosen in `config.py`:
 
 ### The simulated camera
 
+![Simulated camera](docs/camera_fov.png)
+
 The camera is a pinhole **FOV pyramid** rigidly mounted on the follower (with a yaw offset w.r.t. the
 drone x axis). At every cycle the leader's ground-truth position is transformed into the camera
 frame; it counts as *seen* only if it lies inside the pyramid (depth range + horizontal and vertical
@@ -54,17 +48,7 @@ The leader's velocity is estimated by numerical differentiation of the camera me
 
 ### The state machine
 
-```
-              leader in FOV                     leader in FOV
-   ┌──────┐ ───────────────► ┌──────────┐ ◄──────────────── ┌───────────┐
-   │ IDLE │                  │ TRACKING │                   │ SEARCHING │
-   └──────┘ ◄─────────┐      └──────────┘ ────────────────► └───────────┘
-      │   timeout     │           ▲        out of FOV            │
-      ▼               │           │        > timeout             │ search finished
- ┌───────────┐ finished           │ leader in FOV                ▼
- │ EXPLORING │ ───────┘───────────┘                            IDLE
- └───────────┘
-```
+![Follower state machine](docs/state_machine.png)
 
 | State | What the follower does |
 |---|---|
@@ -77,9 +61,15 @@ All search and exploration segments use a 5th-order smoothstep time law whose du
 from the velocity and acceleration limits, so every reference sent to the planner is feasible by
 construction.
 
+![SEARCHING manoeuvre](docs/searching.png)
+
+![EXPLORING ring](docs/exploring.png)
+
 ### The tracking controller
 
-Every 50 ms the follower receives a world-frame velocity and a yaw rate:
+At every control cycle the follower receives a world-frame velocity and a yaw rate:
+
+![Tracking command](docs/tracking_command.png)
 
 - **Position:** P control towards a point at a fixed horizontal distance *behind* the leader along
   the line of sight, at the leader's altitude, **plus full feedforward** of the estimated leader
@@ -94,6 +84,8 @@ Every 50 ms the follower receives a world-frame velocity and a yaw rate:
   in the image.
 - **Bumpless transfer:** when entering TRACKING the rate limiter starts from the follower's
   *measured* velocity, so switching from exploring/searching causes no braking.
+
+![Yaw and vertical priorities](docs/priorities.png)
 
 ### Code map
 
@@ -133,9 +125,9 @@ Every 50 ms the follower receives a world-frame velocity and a yaw rate:
 
 ### Velocity estimation
 
-The leader velocity estimated from the camera (dots) against the ground truth from `pom` (line):
+The leader velocity estimated by differentiating the camera measurements (dots) against the `pom` state estimate (line):
 
-![Velocity estimate vs ground truth](src/final_project/graphics/velocity_comparison.png)
+![Velocity estimate vs ground truth](docs/velocity_estimate.png)
 
 ### Search and recovery
 
