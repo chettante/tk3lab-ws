@@ -60,22 +60,66 @@ def save_real_follower_path(path_points, period, filename=None):
     logger.info(f"[TEMP] Actual follower path saved to {out_file}")
 
 
+def goto_and_wait(targets, reader, timeout):
+    """goto of several drones together, {body: (maneuver, [x, y, z], yaw)}; returns when all of
+    them are within leader_takeoff_tol of their target, raises RuntimeError after timeout s."""
+    for maneuver, p, yaw in targets.values():
+        maneuver.goto(*p, yaw, 0, ack=True)                     # duration 0 = as fast as possible
+    t_end = time.monotonic() + timeout
+    while time.monotonic() < t_end:
+        if all(reader(b)[0] is not None and np.linalg.norm(np.asarray(reader(b)[0]) - t[1])
+               < CONFIG['leader_takeoff_tol'] for b, t in targets.items()):
+            return
+        time.sleep(CONFIG['control_loop_period'])
+    raise RuntimeError(f"drones not on their targets after {timeout:.0f}s: "
+                       + ", ".join(f"{b} at {np.round(reader(b)[0], 2)}" for b in targets))
+
+
+def go_to_start(reader):
+    """Brings both drones to the start of a run, from the ground (takeoff) or from wherever
+    the previous run ended: leader on leader_start_pos, follower on the spawn point of
+    follower_spawn_mode at follower_takeoff_z, camera pointed at the leader.
+    If the follower has to move sideways it first climbs to reposition_z, above the leader."""
+    lb, fb = CONFIG['leader_body'], CONFIG['follower_body']
+    p_l = np.array(CONFIG['leader_start_pos'], dtype=float)
+    f_xy = np.array(CONFIG[f"follower_spawn_{CONFIG['follower_spawn_mode']}_xy"], dtype=float)
+    yaw_f = np.arctan2(*(p_l[:2] - f_xy)[::-1]) - np.radians(CONFIG['camera_yaw_deg'])
+    yaw_f = np.arctan2(np.sin(yaw_f), np.cos(yaw_f))             # in [-pi, pi], as maneuver_bounds
+    p_f = np.r_[f_xy, CONFIG['follower_takeoff_z']]
+    z_up = CONFIG['reposition_z']
+    timeout = CONFIG['reposition_timeout']
+    leader = {lb: (maneuver_l, p_l, CONFIG['leader_start_yaw'])}
+
+    pf, qf = reader(fb)
+    if np.linalg.norm(np.asarray(pf[:2]) - f_xy) < 0.5:          # already above its start point
+        goto_and_wait({**leader, fb: (maneuver_f, p_f, yaw_f)}, reader, timeout)
+        return
+    goto_and_wait({fb: (maneuver_f, np.r_[pf[:2], z_up], _quat_to_yaw(qf))}, reader, timeout)
+    goto_and_wait(leader, reader, timeout)
+    goto_and_wait({fb: (maneuver_f, np.r_[f_xy, z_up], yaw_f)}, reader, timeout)
+    goto_and_wait({fb: (maneuver_f, p_f, yaw_f)}, reader, timeout)
+
+
 # ============================================================================
 # MAIN
 # ============================================================================
 
 def main():
-
-    # ===== SETUP =====
+    """Single run: setup, takeoff, chase, motors off."""
     logger.info("[*] Setting up GenoM3 components...")
-
     setup()
-
     logger.info("[*] Starting motors and servo...")
-
     start()
+    try:
+        run_chase()
+    finally:
+        stop()
 
-    # ===== INITIALIZATION =====
+
+def run_chase():
+    """One chase with the current CONFIG, motors already running: the drones fly to the start
+    positions, the leader flies its trajectory, then both hover. benchmark/run_benchmark.py
+    calls it several times in a row in the same simulation."""
     logger.info("[*] Initializing components...")
 
     # Camera FOV
@@ -235,25 +279,13 @@ def main():
                        f"{CONFIG['tracking_vprio_start_deg']}°: at full acceleration the approach is cut "
                        "even with the leader at the same altitude")
 
+    # takeoff, or flight back to the start positions after a previous run
+    logger.info("[*] Going to the start positions...")
+    go_to_start(optitrack_reader)
     pom_l.log_state(config_path('pom_leader_log'))
     pom_f.log_state(config_path('pom_follower_log'))
     loop_count = 0
     follower_path = []
-    # takeoff: leader to leader_start_pos, follower straight up above its spawn (same yaw)
-    pf, qf = optitrack_reader(CONFIG['follower_body'])
-    targets = {CONFIG['leader_body']: np.array(CONFIG['leader_start_pos'], dtype=float),
-               CONFIG['follower_body']: np.array([pf[0], pf[1], CONFIG['follower_takeoff_z']])}
-    maneuver_f.goto(*targets[CONFIG['follower_body']], _quat_to_yaw(qf), 0, ack=True)
-    maneuver_l.goto(*targets[CONFIG['leader_body']], CONFIG['leader_start_yaw'], 0)   # duration 0 = as fast as possible
-    # the follower goto (ack=True) returns before the drone has arrived (the leader one blocks):
-    # wait for the actual positions, then hover
-    t_end = time.monotonic() + CONFIG['leader_takeoff_timeout']
-    while time.monotonic() < t_end:
-        ps = [optitrack_reader(b)[0] for b in targets]
-        if all(p is not None and np.linalg.norm(np.asarray(p) - t) < CONFIG['leader_takeoff_tol']
-               for p, t in zip(ps, targets.values())):
-            break
-        time.sleep(PERIOD)
     time.sleep(CONFIG['leader_takeoff_hold'])
 
     if th is None:
@@ -321,9 +353,12 @@ def main():
 
             loop_count += 1
     finally:
-        # also on exceptions: stop the drones and close the logs
-        logger.info(f"[*] Loop ended after {loop_count} cycles, stopping the drones")
-        stop()
+        # also on exceptions: both drones hover and the logs are closed
+        logger.info(f"[*] Loop ended after {loop_count} cycles, drones hovering")
+        for m in (maneuver_l, maneuver_f):
+            m.velocity(0, 0, 0, 0, 0, 0, 0, 0)
+        pom_l.log_stop()
+        pom_f.log_stop()
 
     save_real_follower_path(follower_path, PERIOD, config_path('plot_real_trajectory'))
 

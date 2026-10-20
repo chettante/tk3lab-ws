@@ -17,23 +17,26 @@ Leader levels (maneuver limits): 1 = 5 m/s, 1.5 m/s² · 2 = 8 m/s, 3 m/s² ·
 
 ## Running
 
-Inside the tk3lab container, with no simulation running (the runner starts and stops
-`simulation/quad_simulation.sh` for every scenario):
+Inside the tk3lab container. The runner starts **one** simulation for the whole campaign
+(`simulation/quad_simulation.sh`, Gazebo unpaused): the drones take off once and between two
+scenarios they fly back to the start positions, the follower first climbing to `reposition_z`
+so it never crosses the leader. Also the follower spawn (`near` / `far`) is reached in flight,
+so Gazebo never needs a restart. The simulation is restarted only if the drones cannot reach the
+start any more (e.g. after a crash), and every scenario is tried at most twice.
 
 ```sh
 cd ~/tk3lab-ws/src/final_project/benchmark
-python3 run_benchmark.py --campaign c1 --only A01          # first a single short run
-python3 run_benchmark.py --campaign c1 --resume            # then the whole campaign (about 1 hour)
+python3 run_benchmark.py --campaign c1 --only A01 A03     # a few scenarios
+python3 run_benchmark.py --campaign c1 --resume           # all of them, skipping the completed ones
 python3 analyze_benchmark.py results/c1
 ```
 
 - `--phase A B` or `--only D21 D22` run a subset; `--resume` skips the runs already completed.
-- Before each run the runner cleans up what a previous simulation may have left (`gz sim`, pocolibs
-  devices), then starts the main as soon as `sim.log` shows the 9 components running and both drones
-  created in Gazebo, plus `--settle 2` seconds. If the main fails within 30 s it retries once with a
-  longer settle time; the logs of the failed attempt are kept as `failed_main.log` / `failed_sim.log`.
-- Each run takes about 20 s more than its trajectory: about 3 s of motor start and 6 s of climb to 5 m,
-  1 s of hover, 5 s of final tail, plus the simulation start and stop.
-- Each run is in `results/<campaign>/<id>/`: `main.log`, `sim.log`, `log/pom*.log`, `overrides.json`.
+- `--sim-running` uses a simulation you started by hand (`sh quad_simulation.sh`, press Play):
+  nothing is restarted, so if the drones crash the runner stops and you restart it with `--resume`.
+- After each scenario the runner prints the state transitions (`tracking 1, lost 0, ...`): with the
+  `near` spawn (phases A-D) `exploring` must be 0.
+- Each run is in `results/<campaign>/<id>/`: `main.log`, `log/pom*.log`, `overrides.json`,
+  `status.json`; the simulation output is in `results/<campaign>/sim_<n>.log`.
 - The report is in `results/<campaign>/report/`: `summary.csv`, `summary.md`, `phase_*.png`,
   `runs/<id>.png` (the `tracking_plotter.py` figure of each run). `results/` is not committed.
