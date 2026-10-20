@@ -145,9 +145,9 @@ def main():
     follower_bodies=follower_bodies,
     kp_angle=CONFIG['tracking_kp_angle'],
     out_of_fov_timeout=CONFIG['out_of_fov_timeout'],
-    # maneuver limit in TRACKING: per axis, so that the horizontal acceleration stays within the
-    # tilt budget in any direction; back to follower_max_acc when the leader is lost
-    acc_limits=(tracking_acc / np.sqrt(2), CONFIG['follower_max_acc'], CONFIG['max_yaw_acc']),
+    # maneuver limit in TRACKING = tilt budget on each axis (maneuver limits every axis separately:
+    # up to √2·tracking_acc on a horizontal diagonal); back to follower_max_acc when the leader is lost
+    acc_limits=(tracking_acc, CONFIG['follower_max_acc'], CONFIG['max_yaw_acc']),
     )
 
     searching_state = SearchingState(

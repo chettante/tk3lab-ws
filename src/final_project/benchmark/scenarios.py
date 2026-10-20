@@ -13,7 +13,7 @@ _OTTO = {'traj_A': 10.0, 'traj_B': 10.0}
 
 # random waypoints: the leader flies at its maneuver limits = aggressiveness levels
 LEVELS = {
-    1: (5.0, 1.5),     # slower than the follower (tracking 2.6 m/s²)
+    1: (5.0, 1.5),     # slower than the follower (tracking 3.6 m/s² per axis, tilt 20°)
     2: (8.0, 3.0),     # about the same acceleration
     3: (12.0, 5.0),    # about twice, at the follower velocity margin (15/1.3)
     4: (15.0, 8.0),    # outside the envelope
@@ -28,14 +28,14 @@ def _random(level, seed, xy, spawn):
 
 
 SCENARIOS = [
-    # A - reference: hover and straight line (leader ramps at 2 m/s² < follower 2.6 m/s²)
+    # A - reference: hover and straight line (leader ramps at 2 m/s² < follower 3.6 m/s²)
     dict(id='A01', phase='A', label='hover', x=0.0,
          overrides={**_PARAM, 'leader_trajectory': 'hover', 'hover_time': 15.0}),
     *[dict(id=f'A{i + 2:02d}', phase='A', label=f'line {v:g} m/s', x=v,
            overrides={**_PARAM, 'leader_trajectory': 'line', 'leader_speed': v, 'line_length': L})
       for i, (v, L) in enumerate(((3.0, 50.0), (6.0, 100.0), (10.0, 150.0)))],
 
-    # B - curves: circle R = 10 m (limit v = sqrt(2.6·10) ≈ 5.1 m/s) and flat figure-8
+    # B - curves: circle R = 10 m (limit v = sqrt(3.6·10) ≈ 6 m/s) and flat figure-8
     *[dict(id=f'B{i + 1:02d}', phase='B', label=f'circle {v:g} m/s', x=v,
            overrides={**_PARAM, 'leader_trajectory': 'circle', 'leader_speed': v,
                       'circle_radius': 10.0, 'circle_laps': 1.5})
@@ -46,7 +46,7 @@ SCENARIOS = [
 
     # C - acceleration across vs along the line of sight, same values: slalom at 4 m/s with peak
     # lateral acceleration 2 / 4 / 6 m/s², shuttle (back and forth at 6 m/s, stop at each end)
-    # with ramps at 2 / 4 / 6 m/s². Tracking limits: 2.6 m/s² along, tracking_lateral_acc across
+    # with ramps at 2 / 4 / 6 m/s². Tracking limit: 3.6 m/s² per axis (tilt 20°)
     *[dict(id=f'C{i + 1:02d}', phase='C', label=f'slalom {a:g} m/s²', x=a,
            overrides={**_PARAM, 'leader_trajectory': 'slalom', 'leader_speed': 4.0, 'slalom_lat_acc': a})
       for i, a in enumerate((2.0, 4.0, 6.0))],

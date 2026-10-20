@@ -45,10 +45,11 @@ CONFIG = {
     # tracking acceleration as a tilt budget: the camera is rigid, so every degree of
     # follower tilt moves the leader by one degree in the image (at any distance).
     # The main computes a = g·tan(tilt) and uses it for the command rate limiter and, in TRACKING,
-    # as the follower maneuver acceleration limit (a/√2 per axis, so any horizontal direction stays
-    # within a; maneuver.velocity() would otherwise use follower_max_acc to catch up). 10° ≈ 1.7 m/s², 15° ≈ 2.6 m/s², 20° ≈ 3.6 m/s².
+    # as the follower maneuver acceleration limit on each axis (maneuver.velocity() would otherwise use
+    # follower_max_acc to catch up; per axis, so up to √2·a on a horizontal diagonal).
+    # 10° ≈ 1.7 m/s², 15° ≈ 2.6 m/s², 20° ≈ 3.6 m/s² (diagonal 5.0 m/s², about 27°).
     # Budget: tilt + elevation of the leader (atan(dz/d)) should stay below tracking_vprio_start_deg
-    'tracking_max_tilt_deg': 15.0,
+    'tracking_max_tilt_deg': 20.0,
     # yaw priority: the position (xy) correction decreases linearly from 100% at
     # |yaw error| = yaw_priority_start down to 0% at the FOV edge (fov_half_angle_h_deg)
     'tracking_yaw_priority_start_deg': 25.0,

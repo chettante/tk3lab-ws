@@ -7,13 +7,13 @@ overrides listed in `scenarios.py`.
 | Phase | What it tests | Runs |
 |---|---|---|
 | A | hover, straight line at 3 / 6 / 10 m/s | 4 |
-| B | circle R = 10 m at 3 / 5 / 7 m/s (limit ≈ 5.1 m/s), flat figure-8 at 2 / 3 m/s | 5 |
+| B | circle R = 10 m at 3 / 5 / 7 m/s (limit ≈ 6 m/s), flat figure-8 at 2 / 3 m/s | 5 |
 | C | slalom (lateral acceleration) and shuttle (acceleration along the line of sight), 2 / 4 / 6 m/s² | 6 |
 | D | random waypoints with stops, 4 leader levels x 3 seeds | 12 |
 | E | far spawn: exploration and search, levels 1-2 x 2 seeds | 4 |
 
 Leader levels (maneuver limits): 1 = 5 m/s, 1.5 m/s² · 2 = 8 m/s, 3 m/s² ·
-3 = 12 m/s, 5 m/s² · 4 = 15 m/s, 8 m/s². Follower tracking acceleration: 2.6 m/s² (tilt 15°).
+3 = 12 m/s, 5 m/s² · 4 = 15 m/s, 8 m/s². Follower tracking acceleration: 3.6 m/s² per axis (tilt 20°), set as the maneuver limit in TRACKING.
 
 ## Running
 
