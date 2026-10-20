@@ -44,12 +44,15 @@ SCENARIOS = [
            overrides={**_PARAM, **_OTTO, 'leader_trajectory': 'otto', 'leader_speed': v, 'traj_H': 0.0})
       for i, v in enumerate((2.0, 3.0))],
 
-    # C - vertical: step of 2 / 5 m at 2 m/s (vertical FOV at 5 m: about ±2.8 m), figure-8 with H = 5 m
-    *[dict(id=f'C{i + 1:02d}', phase='C', label=f'step {dz:g} m', x=dz,
-           overrides={**_PARAM, 'leader_trajectory': 'vstep', 'leader_speed': 2.0, 'vstep_dz': dz})
-      for i, dz in enumerate((2.0, 5.0))],
-    dict(id='C03', phase='C', label='figure-8 H=5 m', x=5.0,
-         overrides={**_PARAM, **_OTTO, 'leader_trajectory': 'otto', 'leader_speed': 2.0, 'traj_H': 5.0}),
+    # C - acceleration across vs along the line of sight, same values: slalom at 4 m/s with peak
+    # lateral acceleration 2 / 4 / 6 m/s², shuttle (back and forth at 6 m/s, stop at each end)
+    # with ramps at 2 / 4 / 6 m/s². Tracking limits: 2.6 m/s² along, tracking_lateral_acc across
+    *[dict(id=f'C{i + 1:02d}', phase='C', label=f'slalom {a:g} m/s²', x=a,
+           overrides={**_PARAM, 'leader_trajectory': 'slalom', 'leader_speed': 4.0, 'slalom_lat_acc': a})
+      for i, a in enumerate((2.0, 4.0, 6.0))],
+    *[dict(id=f'C{i + 4:02d}', phase='C', label=f'shuttle {a:g} m/s²', x=a,
+           overrides={**_PARAM, 'leader_trajectory': 'shuttle', 'leader_speed': 6.0, 'leader_traj_acc': a})
+      for i, a in enumerate((2.0, 4.0, 6.0))],
 
     # D - aggressiveness: random waypoints with stops, 4 levels x 3 seeds
     *[dict(id=f'D{lv}{s}', phase='D', label=f'level {lv} seed {s}', x=lv,

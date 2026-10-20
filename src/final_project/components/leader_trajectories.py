@@ -1,5 +1,6 @@
 """
-Simple leader trajectories for the benchmark: hover, straight line, circle, vertical step.
+Simple leader trajectories for the benchmark: hover, straight line, circle, vertical step,
+slalom and shuttle.
 
 Same interface as TrajectoryHandler (figure-8): the whole trajectory is sampled once,
 then update_trajectory() sends one velocity + acceleration setpoint per tick to maneuver.
@@ -67,6 +68,19 @@ def _circle(p0, radius, laps, speed, acc, period):
     return pos, vel, acc_v
 
 
+def _slalom(p0, length, speed, acc, amplitude, lat_acc, period):
+    """Forward along +x (smooth ramps, cruise at speed), sine along y of the given amplitude:
+    y = A·sin(k·s) with k chosen so that the peak lateral acceleration at cruise is lat_acc."""
+    s, sd, sdd = _time_law(length, speed, acc, period)
+    k = np.sqrt(lat_acc / amplitude) / speed          # A·(k·v)² = lat_acc
+    sin, cos = np.sin(k * s), np.cos(k * s)
+    zero = np.zeros_like(s)
+    pos = np.asarray(p0, float) + np.column_stack([s, amplitude * sin, zero])
+    vel = np.column_stack([sd, amplitude * k * cos * sd, zero])
+    acc_v = np.column_stack([sdd, -amplitude * k**2 * sin * sd**2 + amplitude * k * cos * sdd, zero])
+    return pos, vel, acc_v
+
+
 class SampledTrajectory:
     """Sampled trajectory sent to maneuver one tick at a time (as TrajectoryHandler)."""
 
@@ -106,7 +120,8 @@ class SampledTrajectory:
 
 
 def build_leader_trajectory(kind, p0, period, cfg):
-    """SampledTrajectory for kind in ('hover', 'line', 'circle', 'vstep'), starting at rest on p0."""
+    """SampledTrajectory for kind in ('hover', 'line', 'circle', 'vstep', 'slalom', 'shuttle'),
+    starting at rest on p0."""
     p0 = np.asarray(p0, float)
     v, a = cfg['leader_speed'], cfg['leader_traj_acc']
     if kind == 'hover':
@@ -121,6 +136,13 @@ def build_leader_trajectory(kind, p0, period, cfg):
         parts = [_hold(p0, hold, period), _segment(p0, top, v, a, period),
                  _hold(top, hold, period), _segment(top, p0, v, a, period),
                  _hold(p0, hold, period)]
+    elif kind == 'slalom':
+        parts = [_slalom(p0, cfg['slalom_length'], v, a, cfg['slalom_amplitude'],
+                         cfg['slalom_lat_acc'], period)]
+    elif kind == 'shuttle':
+        # back and forth along x, stopping at each end: accelerations along the line of sight
+        end = p0 + [cfg['shuttle_length'], 0.0, 0.0]
+        parts = [_segment(p0, end, v, a, period), _segment(end, p0, v, a, period)] * cfg['shuttle_laps']
     else:
         raise ValueError(f"unknown leader trajectory {kind!r}")
     return SampledTrajectory(parts, period)

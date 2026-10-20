@@ -32,7 +32,7 @@ The leader flies one of these trajectories, chosen with `leader_trajectory` in `
   and stops on every waypoint;
 - **figure-8** — a 3D lemniscate, pre-computed with an arc-length time law (smooth start, then
   constant cruise speed) and streamed to the planner sample by sample;
-- **hover, straight line, circle, vertical step** — simple trajectories used by the benchmark,
+- **hover, straight line, circle, vertical step, slalom, shuttle** — simple trajectories used by the benchmark,
   streamed the same way.
 
 ### The simulated camera

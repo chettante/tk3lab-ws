@@ -145,11 +145,12 @@ CONFIG = {
     #   'otto'   figure-8 (traj_A/B/H)              'random' random waypoints, stop at each one
     #   'line'   straight line along +x             'circle' circle tangent to +x at the start
     #   'vstep'  climb by vstep_dz and back down    'hover'  stays still for hover_time
+    #   'slalom' forward along +x, sine along y     'shuttle' back and forth along x, stops at the ends
     'leader_trajectory': 'random',
     # cruise speed of the parametric trajectories (otto, line, circle; vertical speed for vstep).
     # Not used by 'random', which flies at leader_max_velocity / leader_max_acc
     'leader_speed': 5.0,                    # m/s
-    'leader_traj_acc': 2.0,                 # m/s², peak acceleration of the ramps (line, circle, vstep)
+    'leader_traj_acc': 2.0,                 # m/s², peak acceleration of the ramps (line, circle, vstep, shuttle)
 
     'random_traj_points': 20,               # number of random waypoints (+ one final point at rest)
     'random_traj_z_range': (5.0, 10.0),     # m, waypoint altitudes (inside explore_bounds)
@@ -163,6 +164,11 @@ CONFIG = {
     'vstep_dz': 2.0,                        # m, height of the step ('vstep')
     'vstep_hold': 4.0,                      # s, hover before, between and after the two vertical moves
     'hover_time': 15.0,                     # s, duration of 'hover'
+    'slalom_length': 120.0,                 # m, forward length of 'slalom'
+    'slalom_amplitude': 4.0,                # m, lateral amplitude of 'slalom'
+    'slalom_lat_acc': 3.0,                  # m/s², peak lateral acceleration of 'slalom'
+    'shuttle_length': 30.0,                 # m, length of each leg of 'shuttle'
+    'shuttle_laps': 2,                      # out-and-back legs of 'shuttle'
 
     'traj_tail_time': 5.0,                  # s, the main keeps running for this long after the trajectory ends
     'traj_A': 5.0,                          # amplitude along y [m]

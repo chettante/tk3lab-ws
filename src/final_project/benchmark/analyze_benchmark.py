@@ -284,13 +284,12 @@ def main():
                   'Leader speed [m/s]', 'B - curves', os.path.join(report, 'phase_B.png'),
                   vline=(np.sqrt(a_track * 10.0), 'circle limit √(a·R)'))
     if by['C']:
-        s0 = series[by['C'][0]['id']]
-        plot_time_series(by['C'], series, 'elev', 'Vertical angle of the leader [deg]',
-                         'C - vertical motion: leader position in the image',
-                         os.path.join(report, 'phase_C.png'),
-                         hlines=[(s0['fov_v'], 'FOV edge'), (-s0['fov_v'], ''),
-                                 (s0['vprio'], 'vertical priority')],
-                         ylim=(-1.5 * s0['fov_v'], 1.5 * s0['fov_v']))
+        plot_vs_x(by['C'], ['slalom', 'shuttle'],
+                  [('fov_pct', 'Time in FOV [%]'), ('dist_err_rms_m', 'Distance error RMS [m]'),
+                   ('elev_p95_deg', 'Vertical angle p95 [deg]')],
+                  'Peak leader acceleration [m/s²]',
+                  'C - acceleration across (slalom) vs along (shuttle) the line of sight',
+                  os.path.join(report, 'phase_C.png'), vline=(a_track, 'tracking acc along'))
     if by['D']:
         plot_levels(by['D'], 'D - leader aggressiveness (random waypoints, 3 seeds per level)',
                     os.path.join(report, 'phase_D.png'),

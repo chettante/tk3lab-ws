@@ -8,7 +8,7 @@ overrides listed in `scenarios.py`.
 |---|---|---|
 | A | hover, straight line at 3 / 6 / 10 m/s | 4 |
 | B | circle R = 10 m at 3 / 5 / 7 m/s (limit ≈ 5.1 m/s), flat figure-8 at 2 / 3 m/s | 5 |
-| C | altitude step of 2 / 5 m, figure-8 with H = 5 m | 3 |
+| C | slalom (lateral acceleration) and shuttle (acceleration along the line of sight), 2 / 4 / 6 m/s² | 6 |
 | D | random waypoints with stops, 4 leader levels x 3 seeds | 12 |
 | E | far spawn: exploration and search, levels 1-2 x 2 seeds | 4 |
 
