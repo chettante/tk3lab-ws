@@ -144,7 +144,6 @@ def main():
     optitrack_helper=optitrack_reader,
     follower_bodies=follower_bodies,
     kp_angle=CONFIG['tracking_kp_angle'],
-    max_acc=tracking_acc,
     out_of_fov_timeout=CONFIG['out_of_fov_timeout'],
     )
 

@@ -22,7 +22,6 @@ class TrackingState:
         optitrack_helper,
         follower_bodies,
         kp_angle,
-        max_acc,
         out_of_fov_timeout,
     ):
         """
@@ -32,7 +31,6 @@ class TrackingState:
             optitrack_helper: function that reads the poses from OptiTrack
             follower_bodies: tuple ('QR4_leading', 'QR4_following')
             kp_angle: proportional gain on yaw
-            max_acc: acceleration passed to maneuver.velocity() as ax, ay, az (m/s²)
             out_of_fov_timeout: seconds out of the FOV before switching to SEARCHING
         """
         self.camera = camera
@@ -40,7 +38,6 @@ class TrackingState:
         self.optitrack_helper = optitrack_helper
         self.leader_body_name, self.follower_body_name = follower_bodies
         self.kp_angle = kp_angle
-        self.max_acc = max_acc
         self.out_of_fov_timeout = out_of_fov_timeout
 
         # reset by enter(), called by the StateMachine on every transition
@@ -136,9 +133,6 @@ class TrackingState:
             kp_angle=self.kp_angle,
             follower_vel=follower_vel,
         )
-        self.tracker.send_command(
-            velocity_cmd, yaw_cmd,
-            max_acc=self.max_acc,
-        )
+        self.tracker.send_command(velocity_cmd, yaw_cmd)
 
         return None

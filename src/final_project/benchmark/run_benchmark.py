@@ -129,6 +129,9 @@ def main():
         if rc != 0 and duration < 30:
             # usually the components were not ready yet: retry once with a longer wait
             print(f'failed after {duration:.0f}s (rc={rc}), retrying ...', end=' ', flush=True)
+            for name in ('main.log', 'sim.log'):          # keep the logs of the failed attempt
+                if os.path.isfile(os.path.join(run_dir, name)):
+                    os.replace(os.path.join(run_dir, name), os.path.join(run_dir, 'failed_' + name))
             args_retry = argparse.Namespace(**{**vars(args), 'sim_startup': 2 * args.sim_startup})
             rc, duration = run_once(sc, run_dir, args_retry)
         ok = rc == 0 and os.path.isfile(os.path.join(run_dir, 'log', 'pom.log'))

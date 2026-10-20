@@ -221,8 +221,11 @@ class TrackingController:
         self.last_cmd = v_cmd.copy()
         return v_cmd, yaw_cmd
 
-    def send_command(self, velocity_cmd, yaw_cmd: float = 0.0, max_acc: float = 3.0):
-        """Sends the command to the follower (already saturated in compute_command)."""
+    def send_command(self, velocity_cmd, yaw_cmd: float = 0.0):
+        """Sends the command to the follower (already saturated in compute_command).
+        ax, ay, az of maneuver.velocity() are the acceleration of the TARGET state, not a limit:
+        they are 0 (hold the commanded velocity). A nonzero value made the follower drift
+        against it; the acceleration is already bounded by the rate limiter."""
         velocity_cmd = np.asarray(velocity_cmd, dtype=float)
         try:
             self.follower.velocity(
@@ -230,7 +233,7 @@ class TrackingController:
                 vy=float(velocity_cmd[1]),
                 vz=float(velocity_cmd[2]),
                 wz=float(yaw_cmd),
-                ax=max_acc, ay=max_acc, az=max_acc,
+                ax=0.0, ay=0.0, az=0.0,
                 duration=0.0,
             )
         except GenoMError as e:

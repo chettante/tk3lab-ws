@@ -44,8 +44,7 @@ CONFIG = {
     'tracking_kp_angle': 1.5,       # 1/s: steady-state yaw lag ≈ bearing rate / kp_angle
     # tracking acceleration as a tilt budget: the camera is rigid, so every degree of
     # follower tilt moves the leader by one degree in the image (at any distance).
-    # The main computes a = g·tan(tilt) and uses it both for the command rate limiter
-    # and as the ax, ay, az passed to maneuver.velocity(). 10° ≈ 1.7 m/s², 15° ≈ 2.6 m/s², 20° ≈ 3.6 m/s².
+    # The main computes a = g·tan(tilt) and uses it for the command rate limiter. 10° ≈ 1.7 m/s², 15° ≈ 2.6 m/s², 20° ≈ 3.6 m/s².
     # Budget: tilt + elevation of the leader (atan(dz/d)) should stay below tracking_vprio_start_deg
     'tracking_max_tilt_deg': 15.0,
     # yaw priority: the position (xy) correction decreases linearly from 100% at
