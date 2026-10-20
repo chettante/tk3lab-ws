@@ -2,6 +2,7 @@
 
 Usage: python3 docs/make_figures.py <repo root>
 """
+import os, sys
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
