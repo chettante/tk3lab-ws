@@ -41,10 +41,7 @@ CONFIG = {
     # Larger = the bearing turns more slowly (yaw limit v_lat <= max_yaw_rate·d) and a larger
     # height difference fits in the vertical FOV (dz <= d·tan(fov_half_angle_v_deg))
     'tracking_follow_distance': 5.0,
-    'tracking_kp_angle': 1.5,
-    # s, the target point and the yaw aim at the leader predicted this far ahead (p + v·t):
-    # compensates finite difference, 20 Hz loop and maneuver response
-    'tracking_lead_time': 0.25,       # 1/s: steady-state yaw lag ≈ bearing rate / kp_angle
+    'tracking_kp_angle': 1.5,       # 1/s: steady-state yaw lag ≈ bearing rate / kp_angle
     # tracking acceleration as a tilt budget: the camera is rigid, so every degree of
     # follower tilt moves the leader by one degree in the image (at any distance).
     # The main computes a = g·tan(tilt) and uses it for the command rate limiter and, in TRACKING,

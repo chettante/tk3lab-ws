@@ -107,7 +107,6 @@ def main():
     vprio_end_deg=CONFIG['fov_half_angle_v_deg'],           # vertical priority ends at the FOV edge
     max_velocity=CONFIG['follower_max_velocity'],
     yaw_rate_max=CONFIG['max_yaw_rate'],
-    lead_time=CONFIG['tracking_lead_time'],
     )
 
     # Search strategy
