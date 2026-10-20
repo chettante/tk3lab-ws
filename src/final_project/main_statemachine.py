@@ -272,6 +272,7 @@ def main():
     tail_loops = int(round(CONFIG['traj_tail_time'] / PERIOD))
     max_loops = int(np.ceil((traj_time if th is not None else 2 * traj_time) / PERIOD)) + tail_loops
     end_loop = None
+    stall_pos, stall_t = None, None     # leader stopped too long (random waypoints)
 
     # ===== MAIN CONTROL LOOP =====
     logger.info("[*] Starting main control loop")
@@ -304,6 +305,16 @@ def main():
                     leader_pos, _ = optitrack_reader(CONFIG['leader_body'])
                     finished = (leader_pos is not None and np.linalg.norm(
                         np.asarray(leader_pos) - final_point) < CONFIG['leader_takeoff_tol'])
+                    # leader stopped before the last waypoint (maneuver did not execute the queue):
+                    # end the run instead of hovering until twice the estimated duration
+                    if leader_pos is not None and not finished:
+                        if stall_pos is None or np.linalg.norm(np.asarray(leader_pos) - stall_pos) > 0.2:
+                            stall_pos, stall_t = np.asarray(leader_pos, dtype=float), time.monotonic()
+                        elif time.monotonic() - stall_t > CONFIG['leader_stall_time']:
+                            logger.warning(f"Leader still for {CONFIG['leader_stall_time']}s at "
+                                           f"{np.round(stall_pos, 2)}, before the last waypoint "
+                                           f"{np.round(final_point, 2)}: ending the run")
+                            finished = True
                 if finished:
                     end_loop = loop_count + tail_loops
 

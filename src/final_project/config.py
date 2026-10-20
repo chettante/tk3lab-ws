@@ -148,6 +148,7 @@ CONFIG = {
     'random_traj_z_range': (5.0, 10.0),     # m, waypoint altitudes (inside explore_bounds)
     'random_traj_xy_range': 30.0,           # m, x and y drawn in [-range, +range]
     'random_seed': 1,                       # same seed = same waypoints (comparable runs)
+    'leader_stall_time': 15.0,              # s, leader still before the last waypoint -> end of the run
 
     'line_length': 150.0,                   # m, total length of 'line' (ramps included)
     'circle_radius': 10.0,                  # m

@@ -50,11 +50,16 @@ READY_GAZEBO = 'mrsim created /tmp/pty-qr4_following'
 # ---------------------------------------------------------------------------
 
 def cleanup():
-    """Gazebo and pocolibs devices left by a previous simulation: with them 'h2 init' fails.
-    pkill gets the pattern as an argument (a shell running 'pkill -f "gz sim"' would kill itself)."""
-    for cmd in (['pkill', '-f', 'gz sim'], ['h2', 'end']):
+    """Everything a previous simulation may have left: Gazebo, the GenoM3 components, genomixd
+    and the pocolibs devices. With them still alive the new components cannot start and the
+    main fails at once. pkill gets the patterns as arguments (a shell running
+    'pkill -f "gz sim"' would match and kill itself)."""
+    for cmd in (['pkill', '-f', 'gz sim'],
+                ['pkill', '-f', '^(optitrack|nhfc|pom|rotorcraft|maneuver)-pocolibs'],
+                ['pkill', '-x', 'genomixd']):
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(1.0)
+    time.sleep(2.0)
+    subprocess.run(['h2', 'end'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def start_sim(spawn, log_path, max_wait):
@@ -139,6 +144,13 @@ def run_main(sc, run_dir, args):
         proc = subprocess.Popen([sys.executable, MAIN], env=env, stdout=log, stderr=subprocess.STDOUT)
         try:
             rc = proc.wait(args.timeout)
+        except KeyboardInterrupt:
+            # Ctrl+C in the terminal reaches the main too: let it stop the motors, then stop here
+            try:
+                proc.wait(20)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            raise
         except subprocess.TimeoutExpired:
             proc.send_signal(signal.SIGINT)                  # Ctrl+C: the main stops the motors
             try:
@@ -223,7 +235,10 @@ def main():
             text = open(os.path.join(run_dir, 'main.log'), errors='replace').read()
             events = ', '.join(f'{k} {text.count(v)}' for k, v in EVENTS.items())
             print(f'{"ok" if ok else "FAILED"} ({duration:.0f}s) - {events}', flush=True)
+    except KeyboardInterrupt:
+        print('\nInterrupted: stopping Gazebo and its components (wait, do not press Ctrl+C again) ...')
     finally:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)        # the cleanup must not be interrupted
         if not args.sim_running:
             stop_sim(sim)
 
