@@ -47,7 +47,8 @@ image just like on a real drone. The same parameters are copied into the Gazebo 
 rendered camera matches the one used by the controller.
 
 The leader's velocity is estimated by numerical differentiation of the camera measurements
-(transformed back to world frame), and is reset every time the leader re-enters the FOV.
+(transformed back to world frame). When the leader re-enters the FOV the differentiation restarts
+from the new position, but the last estimate is kept as feedforward until the next sample.
 
 ### The state machine
 
@@ -82,9 +83,12 @@ At every control cycle the follower receives a world-frame velocity and a yaw ra
 - **Priorities:** when the leader drifts towards the side of the image, the horizontal correction
   is faded out and the drone turns first; when it drifts towards the top/bottom edge, the approach
   is faded out and only the altitude correction remains.
-- **Tilt budget:** the command is rate-limited to an acceleration derived from a maximum tilt angle
-  (`a = g·tan θ`), because with a rigid camera every degree of tilt shifts the leader by one degree
-  in the image.
+- **Tilt budget:** with a rigid camera every degree of tilt shifts the leader by one degree in the
+  image, so the tracking acceleration is limited to `a = g·tan θ` (θ = 20°, about 3.6 m/s²). The
+  command is rate-limited to `a`, and while in TRACKING the same value is also set as the
+  acceleration limit of the follower's `maneuver` (per axis): otherwise `maneuver` would reach the
+  commanded velocity with its full limit (6 m/s²) and the drone would tilt well beyond the budget.
+  When the leader is lost the limit goes back to 6 m/s², so searching and exploring stay fast.
 - **Bumpless transfer:** when entering TRACKING the rate limiter starts from the follower's
   *measured* velocity, so switching from exploring/searching causes no braking.
 
