@@ -15,6 +15,7 @@ Metrics (from the start of the leader trajectory = leader on leader_start_pos + 
   losses           exits from the FOV after the first acquisition (longer than 0.1 s)
   long_losses      losses longer than out_of_fov_timeout (-> SEARCHING)
   loss_mean_s / loss_max_s   duration of the losses
+  exit_side / exit_vertical / exit_range / exit_behind   where the leader left the FOV
   dist_err_rms_m   RMS of (horizontal distance - follow_distance) with the leader in the FOV
   dist_max_m       maximum 3D distance
   yaw_err_rms_deg  RMS of the yaw error with the leader in the FOV
@@ -109,9 +110,26 @@ def load_run(run_dir):
     m['fov_pct'] = 100 * fov.mean()
     first = int(np.argmax(fov)) if fov.any() else None
     m['t_first_s'] = t[first] if first is not None else np.nan
-    gaps = [b - a for a, b in segments(~fov, t)
+    lost = [(a, b) for a, b in segments(~fov, t)
             if first is not None and a > t[first] and b - a > 0.1]
+    gaps = [b - a for a, b in lost]
     m['losses'] = len(gaps)
+    # where the leader left the FOV, from the first out-of-FOV sample of each loss:
+    # behind = closer than the near plane or behind the camera, range = beyond fov_max_range,
+    # side = horizontal FOV edge, vertical = vertical FOV edge
+    for k in ('exit_behind', 'exit_range', 'exit_side', 'exit_vertical'):
+        m[k] = 0
+    tan_h, tan_v = np.tan(np.radians([cfg['fov_half_angle_h_deg'], cfg['fov_half_angle_v_deg']]))
+    for a, _ in lost:
+        x, y, z = cam[np.searchsorted(t, a)]
+        if x < 0.1:
+            m['exit_behind'] += 1
+        elif x > cfg['fov_max_range']:
+            m['exit_range'] += 1
+        elif abs(y) > x * tan_h:
+            m['exit_side'] += 1
+        else:
+            m['exit_vertical'] += 1
     m['long_losses'] = sum(g > cfg['out_of_fov_timeout'] for g in gaps)
     m['loss_mean_s'] = np.mean(gaps) if gaps else 0.0
     m['loss_max_s'] = max(gaps) if gaps else 0.0
@@ -243,6 +261,7 @@ def main():
         for r in rows:
             w.writerow({k: (round(v, 3) if isinstance(v, float) else v) for k, v in r.items()})
     md_keys = ['id', 'label', 'fov_pct', 't_first_s', 'losses', 'long_losses', 'loss_max_s',
+               'exit_side', 'exit_vertical', 'exit_range', 'exit_behind',
                'dist_err_rms_m', 'yaw_err_rms_deg', 'elev_p95_deg', 'tilt_p95_deg', 'leader_a_p95']
     with open(os.path.join(report, 'summary.md'), 'w') as f:
         f.write('| ' + ' | '.join(md_keys) + ' |\n|' + '---|' * len(md_keys) + '\n')
@@ -265,13 +284,12 @@ def main():
                   'Leader speed [m/s]', 'B - curves', os.path.join(report, 'phase_B.png'),
                   vline=(np.sqrt(a_track * 10.0), 'circle limit √(a·R)'))
     if by['C']:
-        s0 = series[by['C'][0]['id']]
-        plot_time_series(by['C'], series, 'elev', 'Vertical angle of the leader [deg]',
-                         'C - vertical motion: leader position in the image',
-                         os.path.join(report, 'phase_C.png'),
-                         hlines=[(s0['fov_v'], 'FOV edge'), (-s0['fov_v'], ''),
-                                 (s0['vprio'], 'vertical priority')],
-                         ylim=(-1.5 * s0['fov_v'], 1.5 * s0['fov_v']))
+        plot_vs_x(by['C'], ['slalom', 'shuttle'],
+                  [('fov_pct', 'Time in FOV [%]'), ('dist_err_rms_m', 'Distance error RMS [m]'),
+                   ('elev_p95_deg', 'Vertical angle p95 [deg]')],
+                  'Peak leader acceleration [m/s²]',
+                  'C - acceleration across (slalom) vs along (shuttle) the line of sight',
+                  os.path.join(report, 'phase_C.png'), vline=(a_track, 'tracking acc along'))
     if by['D']:
         plot_levels(by['D'], 'D - leader aggressiveness (random waypoints, 3 seeds per level)',
                     os.path.join(report, 'phase_D.png'),

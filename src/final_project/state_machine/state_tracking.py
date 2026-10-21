@@ -23,6 +23,7 @@ class TrackingState:
         follower_bodies,
         kp_angle,
         out_of_fov_timeout,
+        acc_limits,
     ):
         """
         Args:
@@ -32,6 +33,9 @@ class TrackingState:
             follower_bodies: tuple ('QR4_leading', 'QR4_following')
             kp_angle: proportional gain on yaw
             out_of_fov_timeout: seconds out of the FOV before switching to SEARCHING
+            acc_limits: (tracking, free, yaw) acceleration limits of the follower maneuver.
+                maneuver.velocity() reaches the command as fast as its limit allows, so in TRACKING
+                the limit (per axis) is the tilt budget; free = follower_max_acc for the other states
         """
         self.camera = camera
         self.tracker = tracker
@@ -39,6 +43,7 @@ class TrackingState:
         self.leader_body_name, self.follower_body_name = follower_bodies
         self.kp_angle = kp_angle
         self.out_of_fov_timeout = out_of_fov_timeout
+        self.acc_tracking, self.acc_free, self.yaw_acc = acc_limits
 
         # reset by enter(), called by the StateMachine on every transition
         self.last_fov_time = None
@@ -60,6 +65,7 @@ class TrackingState:
         self.last_leader_vel = np.zeros(3)
         self.follower_vel_estimator.reset()
         self.tracker.reset()
+        self.tracker.follower.set_acceleration_limit(self.acc_tracking, self.yaw_acc)
 
     def update(self):
         """
@@ -107,6 +113,7 @@ class TrackingState:
                     f"Leader lost (out of FOV for {elapsed_out:.2f}s), "
                     "transitioning to SEARCHING"
                 )
+                self.tracker.follower.set_acceleration_limit(self.acc_free, self.yaw_acc)
                 return StateType.SEARCHING
 
             # grace period: keep going on the extrapolated position

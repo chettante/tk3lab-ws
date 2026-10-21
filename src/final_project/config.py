@@ -44,9 +44,12 @@ CONFIG = {
     'tracking_kp_angle': 1.5,       # 1/s: steady-state yaw lag ≈ bearing rate / kp_angle
     # tracking acceleration as a tilt budget: the camera is rigid, so every degree of
     # follower tilt moves the leader by one degree in the image (at any distance).
-    # The main computes a = g·tan(tilt) and uses it for the command rate limiter. 10° ≈ 1.7 m/s², 15° ≈ 2.6 m/s², 20° ≈ 3.6 m/s².
+    # The main computes a = g·tan(tilt) and uses it for the command rate limiter and, in TRACKING,
+    # as the follower maneuver acceleration limit on each axis (maneuver.velocity() would otherwise use
+    # follower_max_acc to catch up; per axis, so up to √2·a on a horizontal diagonal).
+    # 10° ≈ 1.7 m/s², 15° ≈ 2.6 m/s², 20° ≈ 3.6 m/s² (diagonal 5.0 m/s², about 27°).
     # Budget: tilt + elevation of the leader (atan(dz/d)) should stay below tracking_vprio_start_deg
-    'tracking_max_tilt_deg': 15.0,
+    'tracking_max_tilt_deg': 20.0,
     # yaw priority: the position (xy) correction decreases linearly from 100% at
     # |yaw error| = yaw_priority_start down to 0% at the FOV edge (fov_half_angle_h_deg)
     'tracking_yaw_priority_start_deg': 25.0,
@@ -99,8 +102,11 @@ CONFIG = {
     # The follower must be faster: follower_max_velocity ≳ 1.3·leader peak velocity
     'leader_max_velocity': 8.0,      # m/s
     'leader_max_acc': 3.0,           # m/s²
-    'max_yaw_rate': 2.0,            # rad/s, both drones
-    'max_yaw_acc': 2.0,             # rad/s², leader angular acceleration limit
+    # yaw limits, both drones: 3 rad/s ≈ 172°/s (ArduPilot 'medium' 180°/s, DJI Mavic 3 200°/s),
+    # 4 rad/s² ≈ 230°/s² (ArduPilot 'slow' 180, 'medium' 360°/s²); about half of the yaw torque
+    # of the simulated drone at hover
+    'max_yaw_rate': 3.0,            # rad/s
+    'max_yaw_acc': 4.0,             # rad/s²
     # flight volume for the maneuver planner: 400 m x 400 m x 50 m (room for the straight line at 10 m/s)
     'maneuver_bounds': {
         'xmin': -200, 'xmax': 200,
@@ -141,11 +147,12 @@ CONFIG = {
     #   'otto'   figure-8 (traj_A/B/H)              'random' random waypoints, stop at each one
     #   'line'   straight line along +x             'circle' circle tangent to +x at the start
     #   'vstep'  climb by vstep_dz and back down    'hover'  stays still for hover_time
+    #   'slalom' forward along +x, sine along y     'shuttle' back and forth along x, stops at the ends
     'leader_trajectory': 'random',
     # cruise speed of the parametric trajectories (otto, line, circle; vertical speed for vstep).
     # Not used by 'random', which flies at leader_max_velocity / leader_max_acc
     'leader_speed': 5.0,                    # m/s
-    'leader_traj_acc': 2.0,                 # m/s², peak acceleration of the ramps (line, circle, vstep)
+    'leader_traj_acc': 2.0,                 # m/s², peak acceleration of the ramps (line, circle, vstep, shuttle)
 
     'random_traj_points': 20,               # number of random waypoints (+ one final point at rest)
     'random_traj_z_range': (5.0, 10.0),     # m, waypoint altitudes (inside explore_bounds)
@@ -159,6 +166,11 @@ CONFIG = {
     'vstep_dz': 2.0,                        # m, height of the step ('vstep')
     'vstep_hold': 4.0,                      # s, hover before, between and after the two vertical moves
     'hover_time': 15.0,                     # s, duration of 'hover'
+    'slalom_length': 120.0,                 # m, forward length of 'slalom'
+    'slalom_amplitude': 4.0,                # m, lateral amplitude of 'slalom'
+    'slalom_lat_acc': 3.0,                  # m/s², peak lateral acceleration of 'slalom'
+    'shuttle_length': 30.0,                 # m, length of each leg of 'shuttle'
+    'shuttle_laps': 2,                      # out-and-back legs of 'shuttle'
 
     'traj_tail_time': 5.0,                  # s, the main keeps running for this long after the trajectory ends
     'traj_A': 5.0,                          # amplitude along y [m]
