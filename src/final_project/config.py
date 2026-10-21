@@ -67,7 +67,7 @@ CONFIG = {
     # follower gets an infeasible target and stops working (10 m/s -> 6.6 m/s² > 6 m/s²)
     'exploring_velocity': 7.0,
     'exploring_yaw_rate': 2.0,
-    'exploring_acc_max': 1.5,       # m/s², peak acceleration of the connector segment to the ring
+    'exploring_acc_max': 5.0,       # m/s², peak acceleration of the connector segment to the ring (< follower_max_acc)
     'explore_bounds': ((-10.0, 10.0), (-10.0, 10.0), (5.0, 15.0)),
     'explore_ring_clearance': 1.0,
     'explore_top_clearance': 1.0,
@@ -181,20 +181,23 @@ CONFIG = {
     # Follower: search strategy parameters
     # ------------------------------------------------------------------
     # recovery: one segment towards the PREDICTED leader position
-    # p_pred = p_last + v_last·(t_lost + T): turns to center it, moves closer
-    # if it is beyond approach_dist, goes to its predicted altitude
-    'search_T_rec': 0.2,            # s, minimum recovery duration and prediction horizon
+    # p_pred = p_last + v_last·min(t_lost + T, search_pred_horizon): turns to center it,
+    # moves closer if it is beyond approach_dist, goes to its predicted altitude; then one
+    # full turn on the spot (looks in every direction, wherever the leader went)
+    'search_T_rec': 0.2,            # s, minimum recovery duration
+    'search_pred_horizon': 2.0,     # s, the straight-line prediction is not extrapolated further
     'search_approach_dist': 5.0,    # m, horizontal distance from the predicted leader (= tracking_follow_distance)
     'search_z_min': 5.5,            # m, altitude limits during recovery
     'search_z_max': 15.0,
-    # global scan: home, climb by delta_z_global while spinning, descend while spinning
-    'search_home': (0.0, 0.0, 5.0),
-    'search_delta_z_global': 3.0,   # top = search_home.z + delta, aligned with the exploration ceiling
+    # global scan on the last known leader position: climb by delta_z_global while spinning,
+    # descend while spinning
+    'search_delta_z_global': 3.0,   # m
     'search_v_scan': 5.0,           # m/s, peak velocity while climbing/descending
-    'search_omega_scan': 2.0,       # rad/s, rotation during the scan
+    'search_omega_scan': 2.0,       # rad/s, rotation during the scans (full turn ≈ 3 s)
     'search_t_hold': 1.0,           # s, duration of each hover
-    'search_a_max': 1.5,            # m/s², peak acceleration of the search segments
-    'search_yaw_acc_max': 2.0,      # rad/s², peak angular acceleration during recovery
+    # m/s², peak acceleration of the search segments: the leader is not in the image,
+    # so the tilt budget does not apply (< follower_max_acc). Yaw: max_yaw_rate / max_yaw_acc
+    'search_a_max': 5.0,
 
 
     # ------------------------------------------------------------------

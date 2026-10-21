@@ -71,17 +71,19 @@ class LeaderSearchManeuver:
 
     Sequence:
       R   recovery: a single smoothstep segment computed on the PREDICTED
-          leader position p_pred = p_L + v_L·(t_lost + T), seen in the
+          leader position p_pred = p_L + v_L·min(t_lost + T, pred_horizon)
+          (straight-line prediction, trusted only for pred_horizon), seen in the
           camera frame (x forward, y left, z up):
             - rotates by Δψ = atan2(y, x)          → leader centered horizontally
             - moves towards p_pred by the part of
               horizontal distance beyond approach_dist
             - goes to the predicted leader altitude → leader centered vertically
           each correction is zero if that FOV constraint is already satisfied
-      Ra  hover t_hold seconds while looking
-      G1  go to p_home, G2 hover
+      Rs  one full turn on the spot at omega_scan: looks in every direction within
+          the camera range, wherever the leader went (turned, braked, reversed)
+      G1  go to the LAST KNOWN leader position (altitude in [z_min, z_max]), G2 hover
       G3  climb by delta_z_global while SPINNING, G4 hover at the top
-      G5  descend to p_home while SPINNING -> end (done=True)
+      G5  descend while SPINNING -> end (done=True)
 
     yaw0 is the CAMERA heading (drone yaw + mounting): the commanded yaw rate
     is the same for drone and camera, because the offset is constant.
@@ -95,17 +97,17 @@ class LeaderSearchManeuver:
       a_max          peak acceleration in all segments [m/s²]
       yaw_acc_max    peak angular acceleration during recovery [rad/s²]
       t_hold         duration of each hover [s]
-      T_rec          minimum recovery duration and prediction horizon [s]
+      T_rec          minimum recovery duration [s]
+      pred_horizon   max time the straight-line prediction is extrapolated [s]
       approach_dist  horizontal distance from the predicted leader to reach [m]
       z_min, z_max   altitude limits during recovery [m]
-      p_home         point where the global scan starts
     """
 
     def __init__(self, p_follower0, yaw0, p_leader_last, v_leader_last,
                  dt=0.05, v_max=3.0, v_scan=1.0, delta_z_global=10.0,
                  omega_scan=1.0, yaw_rate_max=2.0, t_hold=3.0,
                  a_max=1.5, yaw_acc_max=2.0, T_rec=2.5, approach_dist=3.0, z_min=0.5, z_max=12.0,
-                 p_home=(0.0, 0.0, 1.0), t_lost=0.0):
+                 pred_horizon=2.0, t_lost=0.0):
         self.dt = dt
         self.v_max = v_max
         self.v_scan = v_scan
@@ -119,7 +121,7 @@ class LeaderSearchManeuver:
         self.approach_dist = approach_dist
         self.z_min = z_min
         self.z_max = z_max
-        self.p_home = np.asarray(p_home, dtype=float)
+        self.pred_horizon = pred_horizon
 
         self.update_leader(p_leader_last, v_leader_last,
                            p_follower0=p_follower0, yaw0=yaw0, t_lost=t_lost)
@@ -160,7 +162,7 @@ class LeaderSearchManeuver:
         Returns p_pred, p_rec, dyaw.
         """
         p_f0 = self.p_follower0
-        p_pred = self.p_leader_last + self.v_leader_last * (self.t_lost + T)
+        p_pred = self.p_leader_last + self.v_leader_last * min(self.t_lost + T, self.pred_horizon)
         r = p_pred - p_f0
 
         # r in the camera frame (yaw only): x forward, y left
@@ -206,13 +208,14 @@ class LeaderSearchManeuver:
         self.p_pred, self.p_rec, self.dyaw_rec, self.T_rec_eff = self._plan_recovery()
         self._add("R_recovery", self.T_rec_eff, self.p_rec, "turn",
                   _wrap(self.yaw0 + self.dyaw_rec))
-        self._add("R_hold", self.t_hold, self.p_rec)
+        self._add("R_scan", 2 * np.pi / self.omega_scan, self.p_rec, "spin")
 
-        # ---- G: home, hover, climb, hover, descent ----
-        p_home = self.p_home
-        self._add("G1_go_home",
+        # ---- G: last known leader position, hover, climb, hover, descent ----
+        p_home = np.array([self.p_leader_last[0], self.p_leader_last[1],
+                           np.clip(self.p_leader_last[2], self.z_min, self.z_max)])
+        self._add("G1_go_last_seen",
                   _ptp_duration(self.p_rec, p_home, self.v_max, self.a_max), p_home)
-        self._add("G2_hold_home", self.t_hold, p_home)
+        self._add("G2_hold", self.t_hold, p_home)
         p_top = p_home + np.array([0.0, 0.0, self.delta_z_global])
         T_scan = _ptp_duration(p_home, p_top, self.v_scan, self.a_max)
         self._add("G3_scan_up", T_scan, p_top, "spin")
