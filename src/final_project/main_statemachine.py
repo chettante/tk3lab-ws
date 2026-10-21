@@ -117,10 +117,9 @@ def main():
            v_max=CONFIG['follower_max_velocity'], v_scan=CONFIG['search_v_scan'],
            delta_z_global=CONFIG['search_delta_z_global'], omega_scan=CONFIG['search_omega_scan'],
            yaw_rate_max=CONFIG['max_yaw_rate'], t_hold=CONFIG['search_t_hold'],
-           a_max=CONFIG['search_a_max'], yaw_acc_max=CONFIG['max_yaw_acc'],
+           a_max=CONFIG['search_a_max'], yaw_acc_max=CONFIG['search_yaw_acc_max'],
            T_rec=CONFIG['search_T_rec'], approach_dist=CONFIG['search_approach_dist'],
-           z_min=CONFIG['search_z_min'], z_max=CONFIG['search_z_max'],
-           pred_horizon=CONFIG['search_pred_horizon'],
+           z_min=CONFIG['search_z_min'], z_max=CONFIG['search_z_max'], p_home=CONFIG['search_home'],
        )
 
 

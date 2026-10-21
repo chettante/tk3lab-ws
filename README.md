@@ -58,7 +58,7 @@ The leader's velocity is estimated by numerical differentiation of the camera me
 | **IDLE** | Hovers and watches. Leader in view → TRACKING; nothing for a while → EXPLORING. |
 | **EXPLORING** | Flies to a ring around the expected flight volume and circles it while climbing and descending, camera pointed at the centre. |
 | **TRACKING** | Keeps the leader centred in the image (details below). If the leader leaves the FOV it keeps chasing the *predicted* position for a short grace period, then switches to SEARCHING. |
-| **SEARCHING** | Plans a manoeuvre from the last estimate: a fast **recovery** towards where the leader should be now (turning to put it in the centre of the image), then a full turn on the spot (looks in every direction), then a **global scan** on the last known leader position (climb and descend while spinning). |
+| **SEARCHING** | Plans a manoeuvre from the last estimate: a fast **recovery** towards where the leader should be now (turning to put it in the centre of the image), then a **global scan** (go home, climb and descend while spinning). |
 
 All search and exploration segments use a 5th-order smoothstep time law whose duration is computed
 from the velocity and acceleration limits, so every reference sent to the planner is feasible by
